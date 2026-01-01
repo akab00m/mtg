@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/9seconds/mtg/v2/events"
 	"github.com/9seconds/mtg/v2/mtglib"
@@ -19,6 +20,7 @@ type prometheusProcessor struct {
 
 func (p prometheusProcessor) EventStart(evt mtglib.EventStart) {
 	info := acquireStreamInfo()
+	info.startTime = time.Now()
 
 	if evt.RemoteIP.To4() != nil {
 		info.tags[TagIPFamily] = TagIPFamilyIPv4
@@ -69,6 +71,14 @@ func (p prometheusProcessor) EventTraffic(evt mtglib.EventTraffic) {
 
 	direction := getDirection(evt.IsRead)
 
+	// Записываем время первого байта для TTFB метрики
+	if !info.hasFirstByte && evt.IsRead && evt.Traffic > 0 {
+		info.firstByteTime = time.Now()
+		info.hasFirstByte = true
+		ttfb := info.firstByteTime.Sub(info.startTime).Seconds()
+		p.factory.metricTTFB.Observe(ttfb)
+	}
+
 	if info.isDomainFronted {
 		p.factory.metricDomainFrontingTraffic.
 			WithLabelValues(direction).
@@ -90,6 +100,12 @@ func (p prometheusProcessor) EventFinish(evt mtglib.EventFinish) {
 		delete(p.streams, evt.StreamID())
 		releaseStreamInfo(info)
 	}()
+
+	// Записываем duration сессии для анализа throughput
+	if !info.startTime.IsZero() {
+		duration := time.Since(info.startTime).Seconds()
+		p.factory.metricSessionDuration.Observe(duration)
+	}
 
 	p.factory.metricClientConnections.
 		WithLabelValues(info.tags[TagIPFamily]).
@@ -132,6 +148,10 @@ func (p prometheusProcessor) EventIPListSize(evt mtglib.EventIPListSize) {
 	p.factory.metricIPListSize.WithLabelValues(tag).Set(float64(evt.Size))
 }
 
+func (p prometheusProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
+	p.factory.UpdateDNSCacheMetrics(evt.DeltaHits, evt.DeltaMisses, evt.DeltaEvictions, evt.Size)
+}
+
 func (p prometheusProcessor) Shutdown() {
 	for k, v := range p.streams {
 		releaseStreamInfo(v)
@@ -159,6 +179,17 @@ type PrometheusFactory struct {
 	metricDomainFronting     prometheus.Counter
 	metricConcurrencyLimited prometheus.Counter
 	metricReplayAttacks      prometheus.Counter
+
+	// Performance metrics (PHASE 3)
+	metricDNSCacheHits      prometheus.Counter
+	metricDNSCacheMisses    prometheus.Counter
+	metricDNSCacheSize      prometheus.Gauge
+	metricDNSCacheEvictions prometheus.Counter
+	metricRateLimitRejects  prometheus.Counter
+
+	// Mobile optimization metrics (PHASE 4)
+	metricSessionDuration prometheus.Histogram // Длительность сессий для расчёта throughput
+	metricTTFB            prometheus.Histogram // Time To First Byte для latency анализа
 }
 
 // Make builds a new observer.
@@ -178,6 +209,20 @@ func (p *PrometheusFactory) Serve(listener net.Listener) error {
 // is not closed.
 func (p *PrometheusFactory) Close() error {
 	return p.httpServer.Shutdown(context.Background()) //nolint: wrapcheck
+}
+
+// UpdateDNSCacheMetrics updates DNS cache metrics from provided stats.
+// This should be called periodically (e.g., every 10 seconds) to keep metrics fresh.
+func (p *PrometheusFactory) UpdateDNSCacheMetrics(hits, misses, evictions uint64, size int) {
+	p.metricDNSCacheHits.Add(float64(hits))
+	p.metricDNSCacheMisses.Add(float64(misses))
+	p.metricDNSCacheEvictions.Add(float64(evictions))
+	p.metricDNSCacheSize.Set(float64(size))
+}
+
+// IncrementRateLimitRejects increments the rate limit rejection counter.
+func (p *PrometheusFactory) IncrementRateLimitRejects() {
+	p.metricRateLimitRejects.Inc()
 }
 
 // NewPrometheus builds an events.ObserverFactory which can serve HTTP
@@ -248,6 +293,47 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 			Name:      MetricReplayAttacks,
 			Help:      "A number of detected replay attacks.",
 		}),
+
+		// Performance metrics (PHASE 3)
+		metricDNSCacheHits: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_hits",
+			Help:      "Number of DNS cache hits (successful lookups from cache).",
+		}),
+		metricDNSCacheMisses: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_misses",
+			Help:      "Number of DNS cache misses (queries that required DNS resolution).",
+		}),
+		metricDNSCacheSize: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_size",
+			Help:      "Current number of entries in DNS cache.",
+		}),
+		metricDNSCacheEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_evictions",
+			Help:      "Number of DNS cache entries evicted due to LRU policy.",
+		}),
+		metricRateLimitRejects: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "rate_limit_rejects",
+			Help:      "Number of connections rejected due to rate limiting.",
+		}),
+
+		// Mobile optimization metrics (PHASE 4)
+		metricSessionDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: metricPrefix,
+			Name:      "session_duration_seconds",
+			Help:      "Duration of client sessions in seconds. Use with traffic metrics to calculate throughput.",
+			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600},
+		}),
+		metricTTFB: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: metricPrefix,
+			Name:      "time_to_first_byte_seconds",
+			Help:      "Time from connection start to first byte received (download latency indicator).",
+			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+		}),
 	}
 
 	registry.MustRegister(factory.metricClientConnections)
@@ -262,6 +348,17 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 	registry.MustRegister(factory.metricDomainFronting)
 	registry.MustRegister(factory.metricConcurrencyLimited)
 	registry.MustRegister(factory.metricReplayAttacks)
+
+	// Register performance metrics (PHASE 3)
+	registry.MustRegister(factory.metricDNSCacheHits)
+	registry.MustRegister(factory.metricDNSCacheMisses)
+	registry.MustRegister(factory.metricDNSCacheSize)
+	registry.MustRegister(factory.metricDNSCacheEvictions)
+	registry.MustRegister(factory.metricRateLimitRejects)
+
+	// Register mobile optimization metrics (PHASE 4)
+	registry.MustRegister(factory.metricSessionDuration)
+	registry.MustRegister(factory.metricTTFB)
 
 	return factory
 }

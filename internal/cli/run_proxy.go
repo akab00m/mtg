@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/9seconds/mtg/v2/antireplay"
 	"github.com/9seconds/mtg/v2/events"
@@ -267,6 +268,37 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 	}
 
 	ctx := utils.RootContext()
+
+	// Start DNS cache metrics updater if Prometheus is enabled
+	if conf.Stats.Prometheus.Enabled.Get(false) {
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
+			var lastHits, lastMisses, lastEvictions uint64
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					hits, misses, evictions, size := ntw.GetDNSCacheMetrics()
+
+					// Calculate incremental values
+					deltaHits := hits - lastHits
+					deltaMisses := misses - lastMisses
+					deltaEvictions := evictions - lastEvictions
+
+					// Update Prometheus metrics (only if there's a prometheus factory)
+					eventStream.Send(ctx, mtglib.NewEventDNSCacheMetrics(deltaHits, deltaMisses, deltaEvictions, size))
+
+					lastHits = hits
+					lastMisses = misses
+					lastEvictions = evictions
+				}
+			}
+		}()
+	}
 
 	go proxy.Serve(listener) //nolint: errcheck
 

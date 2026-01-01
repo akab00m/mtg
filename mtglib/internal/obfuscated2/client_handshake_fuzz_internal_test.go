@@ -24,7 +24,8 @@ func FuzzClientHandshake(f *testing.F) {
 
 		copy(handshake.data[:], frame)
 
-		decryptor := handshake.decryptor(FuzzClientHandshakeSecret)
+		decryptor, err := handshake.decryptor(FuzzClientHandshakeSecret)
+		require.NoError(t, err)
 		decryptor.XORKeyStream(handshake.data[:], handshake.data[:])
 
 		require.Equal(t, handshakeConnectionType, handshake.connectionType())

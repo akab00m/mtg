@@ -9,7 +9,8 @@ import (
 
 func FuzzServerGenerateHandshakeFrame(f *testing.F) {
 	f.Fuzz(func(t *testing.T, arg int) {
-		frame := generateServerHanshakeFrame()
+		frame, err := generateServerHanshakeFrame()
+		assert.NoError(t, err)
 
 		assert.NotEqualValues(t, 0xef, frame.data[0])
 
