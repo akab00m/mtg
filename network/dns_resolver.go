@@ -194,15 +194,15 @@ func newDNSResolver(hostname string, httpClient *http.Client) *dnsResolver {
 	}
 
 	cache := NewLRUDNSCache(defaultDNSCacheSize)
-	
+
 	resolver := &dnsResolver{
 		dohServer:  hostname,
 		httpClient: httpClient,
 		cache:      cache,
 	}
-	
+
 	// Start background cleanup of expired entries every 5 minutes
 	resolver.cleanupStop = cache.StartCleanupLoop(5 * time.Minute)
-	
+
 	return resolver
 }

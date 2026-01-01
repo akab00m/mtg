@@ -58,7 +58,7 @@ func (s *stableBloomFilterWithMetrics) GetMetrics() Metrics {
 	}
 
 	s.mutex.Lock()
-	estimatedFPRate := s.filter.FillRatio() // BoomFilters provides fill ratio estimation
+	estimatedFPRate := s.filter.StablePoint() // Stable point is the asymptotic FP rate
 	s.mutex.Unlock()
 
 	return Metrics{
