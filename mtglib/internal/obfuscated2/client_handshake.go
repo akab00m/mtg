@@ -12,7 +12,7 @@ type clientHandhakeFrame struct {
 	handshakeFrame
 }
 
-func (c *clientHandhakeFrame) decryptor(secret []byte) cipher.Stream {
+func (c *clientHandhakeFrame) decryptor(secret []byte) (cipher.Stream, error) {
 	hasher := acquireSha256Hasher()
 	defer releaseSha256Hasher(hasher)
 
@@ -22,7 +22,7 @@ func (c *clientHandhakeFrame) decryptor(secret []byte) cipher.Stream {
 	return makeAesCtr(hasher.Sum(nil), c.iv())
 }
 
-func (c *clientHandhakeFrame) encryptor(secret []byte) cipher.Stream {
+func (c *clientHandhakeFrame) encryptor(secret []byte) (cipher.Stream, error) {
 	invertedHandshake := c.invert()
 
 	hasher := acquireSha256Hasher()
@@ -41,8 +41,15 @@ func ClientHandshake(secret []byte, reader io.Reader) (int, cipher.Stream, ciphe
 		return 0, nil, nil, fmt.Errorf("cannot read frame: %w", err)
 	}
 
-	decryptor := handshake.decryptor(secret)
-	encryptor := handshake.encryptor(secret)
+	decryptor, err := handshake.decryptor(secret)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("cannot create decryptor: %w", err)
+	}
+
+	encryptor, err := handshake.encryptor(secret)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("cannot create encryptor: %w", err)
+	}
 
 	decryptor.XORKeyStream(handshake.data[:], handshake.data[:])
 

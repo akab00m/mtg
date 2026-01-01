@@ -50,7 +50,13 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 	p.streamWaitGroup.Add(1)
 	defer p.streamWaitGroup.Done()
 
-	ctx := newStreamContext(p.ctx, p.logger, conn)
+	ctx, err := newStreamContext(p.ctx, p.logger, conn)
+	if err != nil {
+		p.logger.ErrorError("cannot create stream context", err)
+		conn.Close()
+
+		return
+	}
 	defer ctx.Close()
 
 	go func() {
