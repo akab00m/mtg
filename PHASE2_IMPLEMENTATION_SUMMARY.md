@@ -12,9 +12,9 @@
 
 ### 2.1 ✅ Анализ спецификации MTProto 2.0
 
-**Проверено:** Официальная документация на https://core.telegram.org/mtproto
+**Проверено:** Официальная документация на <https://core.telegram.org/mtproto>
 
-#### Ключевые находки:
+#### Ключевые находки
 
 1. **Transport Obfuscation использует AES-256-CTR** ✅
    - Спецификация явно требует: "AES-256-CTR to encrypt and decrypt all outgoing and incoming payloads"
@@ -41,6 +41,7 @@
 #### Файл: `mtglib/internal/faketls/welcome.go`
 
 **Проблема 1:** Panic при генерации random padding (строка 39)
+
 ```go
 // ДО
 if _, err := io.CopyN(&rec.Payload, rand.Reader, int64(1024+mrand.Intn(3092))); err != nil {
@@ -54,6 +55,7 @@ if _, err := io.CopyN(&rec.Payload, rand.Reader, int64(1024+mrand.Intn(3092))); 
 ```
 
 **Проблема 2:** Panic при генерации curve25519 scalar (строка 85)
+
 ```go
 // ДО
 if _, err := rand.Read(scalar[:]); err != nil {
@@ -71,6 +73,7 @@ if _, err := rand.Read(scalar[:]); err != nil {
 ```
 
 **Результат:**
+
 - ✅ Невозможно положить сервер через trigger panic
 - ✅ Клиент получает error marker вместо weak crypto
 - ✅ Логирование ошибок для мониторинга
@@ -89,6 +92,7 @@ if _, err := rand.Read(scalar[:]); err != nil {
    - Объяснение принципа работы (random reset P cells)
 
 2. **Конфигурация и best practices:**
+
    ```go
    // Defaults for 1 MB / 1% FP rate
    DefaultStableBloomFilterMaxSize = 1024 * 1024  // bytes
@@ -131,6 +135,7 @@ type Metrics struct {
 **Имплементация:**
 
 1. **Thread-safe counters:**
+
    ```go
    // Atomic operations - zero overhead reads
    atomic.AddUint64(&s.totalChecks, 1)
@@ -173,6 +178,7 @@ totalChecksCounter.Add(metrics.TotalChecks)
 ```
 
 **Изменено:**
+
 - `mtglib/internal/faketls/welcome.go` - 2 panic → error handling
 - `antireplay/doc.go` - новый файл (68 строк документации)
 - `antireplay/stable_bloom_filter_metrics.go` - новый файл (116 строк кода)
@@ -211,6 +217,7 @@ totalChecksCounter.Add(metrics.TotalChecks)
 ### Мониторинг
 
 1. **Обязательно отслеживать:**
+
    ```bash
    # Replay detection
    mtg_antireplay_total_checks
