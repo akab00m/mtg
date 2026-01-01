@@ -11,6 +11,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	// Количество splice операций между refresh TCP_QUICKACK
+	// TCP_QUICKACK сбрасывается ядром после каждого delayed ACK
+	quickackRefreshInterval = 16
+)
+
 // zeroCopyRelay использует splice() для zero-copy передачи данных через RawConn.
 // Возвращает -1 если нужен fallback на стандартный copy.
 func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
@@ -50,16 +56,25 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	defer syscall.Close(pipeFds[0])
 	defer syscall.Close(pipeFds[1])
 
-	// Увеличиваем размер pipe буфера для лучшей производительности
-	const pipeSize = 65536 // 64KB
+	// Увеличиваем размер pipe буфера для лучшей производительности при медиа
+	// 256KB соответствует размеру буфера копирования и уменьшает количество splice вызовов
+	const pipeSize = 262144 // 256KB (было 64KB)
 	_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, pipeSize)
 
 	var totalBytes int64
 	var fdErr error
+	var spliceCount int // счётчик для периодического обновления TCP_QUICKACK
 
 	// Используем Read для splice операций чтобы сокет оставался в non-blocking режиме
 	readErr := srcRaw.Read(func(fd uintptr) bool {
 		for {
+			// Периодически обновляем TCP_QUICKACK - он сбрасывается ядром
+			// Это критично для мобильных сетей где delayed ACK замедляет download
+			spliceCount++
+			if spliceCount%quickackRefreshInterval == 0 {
+				_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1)
+			}
+
 			// splice: src socket -> pipe
 			n1, err := unix.Splice(int(fd), nil, pipeFds[1], nil, pipeSize, unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK)
 			if err != nil {

@@ -64,6 +64,10 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		// Периодически сбрасываем TCP_QUICKACK на source (telegram)
 		// для более быстрой доставки ACK
 		setTCPQuickACK(src)
+
+		// TCP_NOTSENT_LOWAT снижает latency - уведомляет когда буфер отправки почти пуст
+		// 16KB threshold оптимален для мобильных сетей с высоким RTT
+		setTCPNotSentLowat(dst, 16384)
 	}
 
 	// Try zero-copy first (Linux splice), fallback to standard copy

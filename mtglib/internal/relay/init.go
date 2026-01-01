@@ -1,8 +1,9 @@
 package relay
 
 const (
-	// Увеличен с 64KB до 256KB для лучшей пропускной способности
-	copyBufferSize = 256 * 1024
+	// Увеличен до 1MB для соответствия буферам Telegram клиентов (iOS/Android)
+	// Это уменьшает количество системных вызовов и улучшает throughput на мобильных устройствах
+	copyBufferSize = 1024 * 1024 // 1 MB (было 256 KB)
 )
 
 type Logger interface {
