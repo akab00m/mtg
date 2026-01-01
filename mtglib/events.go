@@ -210,3 +210,33 @@ func NewEventIPListSize(size int, isBlockList bool) EventIPListSize {
 		IsBlockList: isBlockList,
 	}
 }
+
+// EventDNSCacheMetrics is emitted periodically to update DNS cache statistics.
+type EventDNSCacheMetrics struct {
+	eventBase
+
+	// DeltaHits is the number of cache hits since last update
+	DeltaHits uint64
+
+	// DeltaMisses is the number of cache misses since last update
+	DeltaMisses uint64
+
+	// DeltaEvictions is the number of evictions since last update
+	DeltaEvictions uint64
+
+	// Size is the current cache size
+	Size int
+}
+
+// NewEventDNSCacheMetrics creates a new EventDNSCacheMetrics event.
+func NewEventDNSCacheMetrics(deltaHits, deltaMisses, deltaEvictions uint64, size int) EventDNSCacheMetrics {
+	return EventDNSCacheMetrics{
+		eventBase: eventBase{
+			timestamp: time.Now(),
+		},
+		DeltaHits:      deltaHits,
+		DeltaMisses:    deltaMisses,
+		DeltaEvictions: deltaEvictions,
+		Size:           size,
+	}
+}

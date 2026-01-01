@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/9seconds/mtg/v2/essentials"
+	"golang.org/x/sys/unix"
 )
 
 // zeroCopyRelay использует splice() для zero-copy передачи данных через RawConn.
@@ -32,14 +33,7 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 		return -1, nil
 	}
 
-	var srcFd, dstFd int
-
-	// Извлекаем fd из source
-	if err := srcRaw.Control(func(fd uintptr) {
-		srcFd = int(fd)
-	}); err != nil {
-		return -1, nil
-	}
+	var dstFd int
 
 	// Извлекаем fd из destination
 	if err := dstRaw.Control(func(fd uintptr) {
@@ -67,7 +61,7 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	readErr := srcRaw.Read(func(fd uintptr) bool {
 		for {
 			// splice: src socket -> pipe
-			n1, err := syscall.Splice(int(fd), nil, pipeFds[1], nil, pipeSize, syscall.SPLICE_F_MOVE|syscall.SPLICE_F_NONBLOCK)
+			n1, err := unix.Splice(int(fd), nil, pipeFds[1], nil, pipeSize, unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK)
 			if err != nil {
 				if err == syscall.EAGAIN {
 					return false // Сигнализируем что нужно ждать готовности
@@ -84,7 +78,7 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 			// SPLICE_F_MORE говорит ядру что будут еще данные (работает с TCP_CORK)
 			var written int64
 			for written < n1 {
-				n2, err := syscall.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), syscall.SPLICE_F_MOVE|syscall.SPLICE_F_MORE)
+				n2, err := unix.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), unix.SPLICE_F_MOVE|unix.SPLICE_F_MORE)
 				if err != nil {
 					if err == syscall.EAGAIN {
 						continue
