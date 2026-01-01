@@ -77,8 +77,16 @@ func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 	return entry
 }
 
+// MaxIPsPerEntry limits the number of IPs stored per DNS entry to prevent memory abuse
+const MaxIPsPerEntry = 32
+
 // Set stores a DNS entry in cache with TTL
 func (c *LRUDNSCache) Set(key string, ips []string, ttl uint32) {
+	// Limit IPs per entry to prevent memory abuse
+	if len(ips) > MaxIPsPerEntry {
+		ips = ips[:MaxIPsPerEntry]
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 

@@ -16,6 +16,7 @@ type RateLimiter struct {
 	b        int
 	cleanup  time.Duration
 	lastUsed map[string]time.Time
+	stopCh   chan struct{}
 }
 
 // NewRateLimiter creates a new rate limiter.
@@ -29,6 +30,7 @@ func NewRateLimiter(r rate.Limit, b int, cleanup time.Duration) *RateLimiter {
 		r:        r,
 		b:        b,
 		cleanup:  cleanup,
+		stopCh:   make(chan struct{}),
 	}
 
 	go rl.cleanupLoop()
@@ -52,20 +54,30 @@ func (rl *RateLimiter) Allow(ip net.IP) bool {
 	return limiter.Allow()
 }
 
+// Stop gracefully stops the rate limiter cleanup goroutine.
+func (rl *RateLimiter) Stop() {
+	close(rl.stopCh)
+}
+
 // cleanupLoop removes old rate limiters that haven't been used recently.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for key, lastUsed := range rl.lastUsed {
-			if now.Sub(lastUsed) > rl.cleanup*2 {
-				delete(rl.limiters, key)
-				delete(rl.lastUsed, key)
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for key, lastUsed := range rl.lastUsed {
+				if now.Sub(lastUsed) > rl.cleanup*2 {
+					delete(rl.limiters, key)
+					delete(rl.lastUsed, key)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
