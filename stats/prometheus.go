@@ -159,6 +159,13 @@ type PrometheusFactory struct {
 	metricDomainFronting     prometheus.Counter
 	metricConcurrencyLimited prometheus.Counter
 	metricReplayAttacks      prometheus.Counter
+	
+	// Performance metrics (PHASE 3)
+	metricDNSCacheHits      prometheus.Counter
+	metricDNSCacheMisses    prometheus.Counter
+	metricDNSCacheSize      prometheus.Gauge
+	metricDNSCacheEvictions prometheus.Counter
+	metricRateLimitRejects  prometheus.Counter
 }
 
 // Make builds a new observer.
@@ -178,6 +185,20 @@ func (p *PrometheusFactory) Serve(listener net.Listener) error {
 // is not closed.
 func (p *PrometheusFactory) Close() error {
 	return p.httpServer.Shutdown(context.Background()) //nolint: wrapcheck
+}
+
+// UpdateDNSCacheMetrics updates DNS cache metrics from provided stats.
+// This should be called periodically (e.g., every 10 seconds) to keep metrics fresh.
+func (p *PrometheusFactory) UpdateDNSCacheMetrics(hits, misses, evictions uint64, size int) {
+	p.metricDNSCacheHits.Add(float64(hits))
+	p.metricDNSCacheMisses.Add(float64(misses))
+	p.metricDNSCacheEvictions.Add(float64(evictions))
+	p.metricDNSCacheSize.Set(float64(size))
+}
+
+// IncrementRateLimitRejects increments the rate limit rejection counter.
+func (p *PrometheusFactory) IncrementRateLimitRejects() {
+	p.metricRateLimitRejects.Inc()
 }
 
 // NewPrometheus builds an events.ObserverFactory which can serve HTTP
@@ -248,6 +269,33 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 			Name:      MetricReplayAttacks,
 			Help:      "A number of detected replay attacks.",
 		}),
+		
+		// Performance metrics (PHASE 3)
+		metricDNSCacheHits: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_hits",
+			Help:      "Number of DNS cache hits (successful lookups from cache).",
+		}),
+		metricDNSCacheMisses: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_misses",
+			Help:      "Number of DNS cache misses (queries that required DNS resolution).",
+		}),
+		metricDNSCacheSize: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_size",
+			Help:      "Current number of entries in DNS cache.",
+		}),
+		metricDNSCacheEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "dns_cache_evictions",
+			Help:      "Number of DNS cache entries evicted due to LRU policy.",
+		}),
+		metricRateLimitRejects: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "rate_limit_rejects",
+			Help:      "Number of connections rejected due to rate limiting.",
+		}),
 	}
 
 	registry.MustRegister(factory.metricClientConnections)
@@ -262,6 +310,13 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 	registry.MustRegister(factory.metricDomainFronting)
 	registry.MustRegister(factory.metricConcurrencyLimited)
 	registry.MustRegister(factory.metricReplayAttacks)
+	
+	// Register performance metrics (PHASE 3)
+	registry.MustRegister(factory.metricDNSCacheHits)
+	registry.MustRegister(factory.metricDNSCacheMisses)
+	registry.MustRegister(factory.metricDNSCacheSize)
+	registry.MustRegister(factory.metricDNSCacheEvictions)
+	registry.MustRegister(factory.metricRateLimitRejects)
 
 	return factory
 }
