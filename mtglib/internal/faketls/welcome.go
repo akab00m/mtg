@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"io"
 	mrand "math/rand"
 
@@ -37,7 +38,7 @@ func SendWelcomePacket(writer io.Writer, secret []byte, clientHello ClientHello)
 	rec.Version = record.Version12
 
 	if _, err := io.CopyN(&rec.Payload, rand.Reader, int64(1024+mrand.Intn(3092))); err != nil { //nolint: gomnd
-		panic(err)
+		return fmt.Errorf("cannot generate random padding: %w", err)
 	}
 
 	rec.Dump(buf) //nolint: errcheck
@@ -77,7 +78,11 @@ func generateServerHello(writer io.Writer, clientHello ClientHello) {
 	scalar := [32]byte{}
 
 	if _, err := rand.Read(scalar[:]); err != nil {
-		panic(err)
+		// SECURITY: If crypto/rand fails, abort handshake rather than expose weak randomness
+		// Write error marker to prevent client from proceeding
+		header := [4]byte{HandshakeTypeServer, 0xFF, 0xFF, 0xFF}
+		writer.Write(header[:]) //nolint: errcheck
+		return
 	}
 
 	curve, _ := curve25519.X25519(scalar[:], curve25519.Basepoint)
