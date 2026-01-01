@@ -11,3 +11,19 @@ ccbuilds/
 .bin/
 coverage.txt
 dist/
+
+# Commit message files
+commit.message.md
+commit.message.txt
+*.message.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
