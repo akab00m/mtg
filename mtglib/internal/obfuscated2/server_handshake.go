@@ -12,21 +12,32 @@ type serverHandshakeFrame struct {
 	handshakeFrame
 }
 
-func (s *serverHandshakeFrame) decryptor() cipher.Stream {
+func (s *serverHandshakeFrame) decryptor() (cipher.Stream, error) {
 	invertedHandshake := s.invert()
 
 	return makeAesCtr(invertedHandshake.key(), invertedHandshake.iv())
 }
 
-func (s *serverHandshakeFrame) encryptor() cipher.Stream {
+func (s *serverHandshakeFrame) encryptor() (cipher.Stream, error) {
 	return makeAesCtr(s.key(), s.iv())
 }
 
 func ServerHandshake(writer io.Writer) (cipher.Stream, cipher.Stream, error) {
-	handshake := generateServerHanshakeFrame()
+	handshake, err := generateServerHanshakeFrame()
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot generate server handshake: %w", err)
+	}
+
 	copyHandshake := handshake
-	encryptor := handshake.encryptor()
-	decryptor := handshake.decryptor()
+	encryptor, err := handshake.encryptor()
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot create encryptor: %w", err)
+	}
+
+	decryptor, err := handshake.decryptor()
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot create decryptor: %w", err)
+	}
 
 	encryptor.XORKeyStream(handshake.data[:], handshake.data[:])
 	copy(handshake.key(), copyHandshake.key())
@@ -39,12 +50,12 @@ func ServerHandshake(writer io.Writer) (cipher.Stream, cipher.Stream, error) {
 	return encryptor, decryptor, nil
 }
 
-func generateServerHanshakeFrame() serverHandshakeFrame {
+func generateServerHanshakeFrame() (serverHandshakeFrame, error) {
 	frame := serverHandshakeFrame{}
 
 	for {
 		if _, err := rand.Read(frame.data[:]); err != nil {
-			panic(err)
+			return serverHandshakeFrame{}, fmt.Errorf("cannot generate random data: %w", err)
 		}
 
 		if frame.data[0] == 0xef { //nolint: gomnd // taken from tg sources
@@ -62,6 +73,6 @@ func generateServerHanshakeFrame() serverHandshakeFrame {
 
 		copy(frame.connectionType(), handshakeConnectionType)
 
-		return frame
+		return frame, nil
 	}
 }

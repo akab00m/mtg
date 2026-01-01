@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net"
 	"time"
 
@@ -52,11 +53,11 @@ func (s *streamContext) ClientIP() net.IP {
 	return s.clientConn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
 }
 
-func newStreamContext(ctx context.Context, logger Logger, clientConn essentials.Conn) *streamContext {
+func newStreamContext(ctx context.Context, logger Logger, clientConn essentials.Conn) (*streamContext, error) {
 	connIDBytes := make([]byte, ConnectionIDBytesLength)
 
 	if _, err := rand.Read(connIDBytes); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("cannot generate stream ID: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -70,5 +71,5 @@ func newStreamContext(ctx context.Context, logger Logger, clientConn essentials.
 		BindStr("stream-id", streamCtx.streamID).
 		BindStr("client-ip", streamCtx.ClientIP().String())
 
-	return streamCtx
+	return streamCtx, nil
 }
