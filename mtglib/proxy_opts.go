@@ -1,6 +1,10 @@
 package mtglib
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/time/rate"
+)
 
 // ProxyOpts is a structure with settings to mtg proxy.
 //
@@ -111,6 +115,23 @@ type ProxyOpts struct {
 	//
 	// This is an optional setting.
 	UseTestDCs bool
+
+	// Config contains timeouts and other configurable parameters.
+	//
+	// This is an optional setting. If not provided, default values will be used.
+	Config *ProxyConfig
+
+	// RateLimitPerSecond defines the maximum number of handshakes per second per IP.
+	//
+	// Set to 0 to disable rate limiting.
+	//
+	// This is an optional setting. Default: 10 handshakes/sec
+	RateLimitPerSecond float64
+
+	// RateLimitBurst defines the maximum burst size for rate limiting.
+	//
+	// This is an optional setting. Default: 20
+	RateLimitBurst int
 }
 
 func (p ProxyOpts) valid() error {
@@ -168,4 +189,28 @@ func (p ProxyOpts) getPreferIP() string {
 
 func (p ProxyOpts) getLogger(name string) Logger {
 	return p.Logger.Named(name)
+}
+
+func (p ProxyOpts) getConfig() ProxyConfig {
+	if p.Config != nil {
+		return *p.Config
+	}
+
+	return DefaultProxyConfig()
+}
+
+func (p ProxyOpts) getRateLimitPerSecond() rate.Limit {
+	if p.RateLimitPerSecond == 0 {
+		return 10 // default: 10 requests per second
+	}
+
+	return rate.Limit(p.RateLimitPerSecond)
+}
+
+func (p ProxyOpts) getRateLimitBurst() int {
+	if p.RateLimitBurst == 0 {
+		return 20 // default burst
+	}
+
+	return p.RateLimitBurst
 }
