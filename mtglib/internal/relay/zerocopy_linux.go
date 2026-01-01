@@ -10,81 +10,99 @@ import (
 	"github.com/9seconds/mtg/v2/essentials"
 )
 
-// zeroCopyRelay пытается использовать splice() для zero-copy передачи данных.
-// Возвращает true если splice успешен, false если нужен fallback.
+// zeroCopyRelay использует splice() для zero-copy передачи данных через RawConn.
+// Возвращает -1 если нужен fallback на стандартный copy.
 func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
-	// Получаем raw file descriptors
+	// Получаем TCP connections
 	srcTCP, srcOk := src.(*net.TCPConn)
 	dstTCP, dstOk := dst.(*net.TCPConn)
 
 	if !srcOk || !dstOk {
-		// Not TCP connections, use standard copy
+		return -1, nil // Not TCP, use fallback
+	}
+
+	// Получаем SyscallConn для доступа к fd без дублирования
+	srcRaw, err := srcTCP.SyscallConn()
+	if err != nil {
 		return -1, nil
 	}
 
-	srcFile, err := srcTCP.File()
+	dstRaw, err := dstTCP.SyscallConn()
 	if err != nil {
-		return -1, nil // Fallback to standard copy
+		return -1, nil
 	}
-	defer srcFile.Close()
 
-	dstFile, err := dstTCP.File()
-	if err != nil {
-		return -1, nil // Fallback to standard copy
+	var srcFd, dstFd int
+	var fdErr error
+
+	// Извлекаем fd из source
+	if err := srcRaw.Control(func(fd uintptr) {
+		srcFd = int(fd)
+	}); err != nil {
+		return -1, nil
 	}
-	defer dstFile.Close()
 
-	srcFd := int(srcFile.Fd())
-	dstFd := int(dstFile.Fd())
+	// Извлекаем fd из destination
+	if err := dstRaw.Control(func(fd uintptr) {
+		dstFd = int(fd)
+	}); err != nil {
+		return -1, nil
+	}
 
 	// Создаём pipe для splice
 	var pipeFds [2]int
 	if err := syscall.Pipe(pipeFds[:]); err != nil {
-		return -1, nil // Fallback to standard copy
+		return -1, nil
 	}
 	defer syscall.Close(pipeFds[0])
 	defer syscall.Close(pipeFds[1])
 
 	// Увеличиваем размер pipe буфера для лучшей производительности
 	const pipeSize = 65536 // 64KB
-	syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, pipeSize)
+	_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, pipeSize)
 
 	var totalBytes int64
 
-	for {
-		// splice: src socket -> pipe
-		n1, err := syscall.Splice(srcFd, nil, pipeFds[1], nil, pipeSize, syscall.SPLICE_F_MOVE|syscall.SPLICE_F_NONBLOCK)
-		if err != nil {
-			if err == syscall.EAGAIN {
-				continue
-			}
-			if n1 == 0 {
-				// EOF
-				return totalBytes, nil
-			}
-			return totalBytes, err
-		}
-
-		if n1 == 0 {
-			// EOF
-			return totalBytes, nil
-		}
-
-		// splice: pipe -> dst socket
-		var written int64
-		for written < n1 {
-			n2, err := syscall.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), syscall.SPLICE_F_MOVE|syscall.SPLICE_F_MORE)
+	// Используем Read для splice операций чтобы сокет оставался в non-blocking режиме
+	readErr := srcRaw.Read(func(fd uintptr) bool {
+		for {
+			// splice: src socket -> pipe
+			n1, err := syscall.Splice(int(fd), nil, pipeFds[1], nil, pipeSize, syscall.SPLICE_F_MOVE|syscall.SPLICE_F_NONBLOCK)
 			if err != nil {
 				if err == syscall.EAGAIN {
-					continue
+					return false // Сигнализируем что нужно ждать готовности
 				}
-				return totalBytes + written, err
+				fdErr = err
+				return true
 			}
-			written += n2
-		}
 
-		totalBytes += written
+			if n1 == 0 {
+				return true // EOF
+			}
+
+			// splice: pipe -> dst socket
+			var written int64
+			for written < n1 {
+				n2, err := syscall.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), syscall.SPLICE_F_MOVE|syscall.SPLICE_F_MORE)
+				if err != nil {
+					if err == syscall.EAGAIN {
+						continue
+					}
+					fdErr = err
+					return true
+				}
+				written += n2
+			}
+
+			totalBytes += written
+		}
+	})
+
+	if readErr != nil {
+		return totalBytes, readErr
 	}
+
+	return totalBytes, fdErr
 }
 
 // copyWithZeroCopy пытается zero-copy, fallback на io.CopyBuffer
