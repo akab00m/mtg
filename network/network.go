@@ -75,12 +75,22 @@ func (n *network) dnsResolve(protocol, address string) ([]string, error) {
 		return []string{address}, nil
 	}
 
+	// Optimize for "tcp" protocol - use parallel A+AAAA lookup
+	if protocol == "tcp" {
+		ips := n.dns.LookupBoth(address)
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("cannot find any ips for %s:%s", protocol, address)
+		}
+		return ips, nil
+	}
+
+	// For tcp4/tcp6, use specific lookups
 	ips := []string{}
 	wg := &sync.WaitGroup{}
 	mutex := &sync.Mutex{}
 
 	switch protocol {
-	case "tcp", "tcp4":
+	case "tcp4":
 		wg.Add(1)
 
 		go func() {
@@ -95,7 +105,7 @@ func (n *network) dnsResolve(protocol, address string) ([]string, error) {
 	}
 
 	switch protocol {
-	case "tcp", "tcp6":
+	case "tcp6":
 		wg.Add(1)
 
 		go func() {
