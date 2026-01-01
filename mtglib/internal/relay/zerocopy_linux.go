@@ -33,7 +33,6 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	}
 
 	var srcFd, dstFd int
-	var fdErr error
 
 	// Извлекаем fd из source
 	if err := srcRaw.Control(func(fd uintptr) {
@@ -62,6 +61,7 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, pipeSize)
 
 	var totalBytes int64
+	var fdErr error
 
 	// Используем Read для splice операций чтобы сокет оставался в non-blocking режиме
 	readErr := srcRaw.Read(func(fd uintptr) bool {
@@ -81,6 +81,7 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 			}
 
 			// splice: pipe -> dst socket
+			// SPLICE_F_MORE говорит ядру что будут еще данные (работает с TCP_CORK)
 			var written int64
 			for written < n1 {
 				n2, err := syscall.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), syscall.SPLICE_F_MOVE|syscall.SPLICE_F_MORE)
