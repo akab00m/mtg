@@ -14,7 +14,7 @@
 
 **Коммит:** d582fb1
 
-#### Проблемы ДО оптимизации:
+#### Проблемы ДО оптимизации
 
 ```go
 // СТАРАЯ РЕАЛИЗАЦИЯ
@@ -34,12 +34,13 @@ func (c dnsResolverCacheEntry) Ok() bool {
 ```
 
 **Недостатки:**
+
 - ❌ Фиксированный TTL (10 минут) игнорирует DNS response TTL
 - ❌ Unbounded cache growth → memory leak при большом числе уникальных доменов
 - ❌ Нет eviction policy → DoS через spam уникальных доменов
 - ❌ Нет метрик → невозможно отследить эффективность cache
 
-#### Новая реализация:
+#### Новая реализация
 
 **Файл: `network/dns_cache.go` (NEW)**
 
@@ -66,6 +67,7 @@ type DNSCacheEntry struct {
 **Ключевые улучшения:**
 
 1. **TTL из DNS ответа:**
+
    ```go
    if rr.Header().Ttl > 0 {
        ttl = normalizeTTL(rr.Header().Ttl)
@@ -74,6 +76,7 @@ type DNSCacheEntry struct {
    ```
 
 2. **LRU eviction:**
+
    ```go
    if c.lruList.Len() > c.maxSize {
        oldest := c.lruList.Back()
@@ -84,12 +87,14 @@ type DNSCacheEntry struct {
    ```
 
 3. **Автоматический cleanup:**
+
    ```go
    // Запускается каждые 5 минут
    resolver.cleanupStop = cache.StartCleanupLoop(5 * time.Minute)
    ```
 
 4. **Метрики для мониторинга:**
+
    ```go
    type DNSCacheMetrics struct {
        Size      int
@@ -100,7 +105,7 @@ type DNSCacheEntry struct {
    }
    ```
 
-#### Performance характеристики:
+#### Performance характеристики
 
 | Операция | Сложность | Примечание |
 |----------|-----------|------------|
@@ -109,7 +114,7 @@ type DNSCacheEntry struct {
 | Eviction | O(1) | Remove oldest from back |
 | Cleanup | O(n) | Раз в 5 минут |
 
-#### Memory bounds:
+#### Memory bounds
 
 ```
 Max memory = maxSize * entry_size
@@ -133,7 +138,7 @@ Max memory = maxSize * entry_size
 
 **Коммит:** 091760f
 
-#### Добавленные метрики:
+#### Добавленные метрики
 
 **DNS Cache:**
 
@@ -150,7 +155,7 @@ mtg_dns_cache_evictions  Counter  // LRU evictions
 mtg_rate_limit_rejects   Counter  // Rejected connections
 ```
 
-#### API для обновления метрик:
+#### API для обновления метрик
 
 ```go
 // Periodically update DNS cache metrics
@@ -170,7 +175,7 @@ func (p *PrometheusFactory) IncrementRateLimitRejects() {
 }
 ```
 
-#### Использование:
+#### Использование
 
 ```go
 // Update metrics every 10 seconds
@@ -185,7 +190,7 @@ go func() {
 }()
 ```
 
-#### Grafana queries (примеры):
+#### Grafana queries (примеры)
 
 ```promql
 # DNS cache hit rate
@@ -209,6 +214,7 @@ rate(mtg_dns_cache_evictions[1m])
 ### Unit тесты (network/dns_cache_test.go)
 
 **Coverage:**
+
 - ✅ Basic Get/Set operations
 - ✅ TTL expiration behavior
 - ✅ LRU eviction on overflow
@@ -268,7 +274,7 @@ New files: 2 (dns_cache.go, dns_cache_test.go)
 
 ## Оставшиеся задачи PHASE 3
 
-### 🔄 В очереди:
+### 🔄 В очереди
 
 1. **Parallel DNS resolution** (не начато)
    - Concurrent queries для A + AAAA records

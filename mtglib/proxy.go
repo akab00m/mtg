@@ -64,16 +64,18 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 
 	ctx, err := newStreamContext(p.ctx, p.logger, conn)
 	if err != nil {
-		p.logger.ErrorError("cannot create stream context", err)
+		p.logger.WarningError("cannot create stream context", err)
 		conn.Close()
 
 		return
 	}
 	defer ctx.Close()
 
-	// Add handshake timeout
-	handshakeCtx, handshakeCancel := context.WithTimeout(ctx, p.config.HandshakeTimeout)
-	defer handshakeCancel()
+	// Set handshake deadline on connection
+	if p.config.HandshakeTimeout > 0 {
+		conn.SetDeadline(time.Now().Add(p.config.HandshakeTimeout))
+		defer conn.SetDeadline(time.Time{}) // Clear deadline after handshake
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -88,11 +90,11 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 		ctx.logger.Info("Stream has been finished")
 	}()
 
-	if !p.doFakeTLSHandshake(handshakeCtx) {
+	if !p.doFakeTLSHandshake(ctx) {
 		return
 	}
 
-	if err := p.doObfuscated2Handshake(handshakeCtx); err != nil {
+	if err := p.doObfuscated2Handshake(ctx); err != nil {
 		p.logger.InfoError("obfuscated2 handshake is failed", err)
 
 		return

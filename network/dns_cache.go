@@ -24,7 +24,7 @@ type LRUDNSCache struct {
 	cache    map[string]*list.Element
 	lruList  *list.List
 	mutex    sync.RWMutex
-	
+
 	// Metrics
 	hits   uint64
 	misses uint64
@@ -41,7 +41,7 @@ func NewLRUDNSCache(maxSize int) *LRUDNSCache {
 	if maxSize <= 0 {
 		maxSize = 1000 // Default: 1000 entries
 	}
-	
+
 	return &LRUDNSCache{
 		maxSize: maxSize,
 		cache:   make(map[string]*list.Element, maxSize),
@@ -53,15 +53,15 @@ func NewLRUDNSCache(maxSize int) *LRUDNSCache {
 func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	elem, ok := c.cache[key]
 	if !ok {
 		c.misses++
 		return nil
 	}
-	
+
 	entry := elem.Value.(*lruCacheEntry).value
-	
+
 	// Check if expired
 	if entry.Expired() {
 		// Remove expired entry
@@ -70,7 +70,7 @@ func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 		c.misses++
 		return nil
 	}
-	
+
 	// Move to front (most recently used)
 	c.lruList.MoveToFront(elem)
 	c.hits++
@@ -81,7 +81,7 @@ func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 func (c *LRUDNSCache) Set(key string, ips []string, ttl uint32) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	// Check if key already exists
 	if elem, ok := c.cache[key]; ok {
 		// Update existing entry
@@ -94,7 +94,7 @@ func (c *LRUDNSCache) Set(key string, ips []string, ttl uint32) {
 		}
 		return
 	}
-	
+
 	// Create new entry
 	newEntry := &lruCacheEntry{
 		key: key,
@@ -104,10 +104,10 @@ func (c *LRUDNSCache) Set(key string, ips []string, ttl uint32) {
 			TTL:       ttl,
 		},
 	}
-	
+
 	elem := c.lruList.PushFront(newEntry)
 	c.cache[key] = elem
-	
+
 	// Evict oldest if over capacity
 	if c.lruList.Len() > c.maxSize {
 		oldest := c.lruList.Back()
@@ -141,13 +141,13 @@ type DNSCacheMetrics struct {
 func (c *LRUDNSCache) GetMetrics() DNSCacheMetrics {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	totalRequests := c.hits + c.misses
 	var hitRate float64
 	if totalRequests > 0 {
 		hitRate = float64(c.hits) / float64(totalRequests) * 100.0
 	}
-	
+
 	return DNSCacheMetrics{
 		Size:      c.lruList.Len(),
 		MaxSize:   c.maxSize,
@@ -162,10 +162,10 @@ func (c *LRUDNSCache) GetMetrics() DNSCacheMetrics {
 func (c *LRUDNSCache) CleanupExpired() int {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	removed := 0
 	var toRemove []*list.Element
-	
+
 	// Collect expired entries
 	for elem := c.lruList.Front(); elem != nil; elem = elem.Next() {
 		entry := elem.Value.(*lruCacheEntry)
@@ -173,7 +173,7 @@ func (c *LRUDNSCache) CleanupExpired() int {
 			toRemove = append(toRemove, elem)
 		}
 	}
-	
+
 	// Remove them
 	for _, elem := range toRemove {
 		entry := elem.Value.(*lruCacheEntry)
@@ -181,18 +181,18 @@ func (c *LRUDNSCache) CleanupExpired() int {
 		delete(c.cache, entry.key)
 		removed++
 	}
-	
+
 	return removed
 }
 
 // StartCleanupLoop starts a background goroutine that periodically removes expired entries
 func (c *LRUDNSCache) StartCleanupLoop(interval time.Duration) chan struct{} {
 	stop := make(chan struct{})
-	
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -202,6 +202,6 @@ func (c *LRUDNSCache) StartCleanupLoop(interval time.Duration) chan struct{} {
 			}
 		}
 	}()
-	
+
 	return stop
 }

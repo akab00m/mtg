@@ -159,7 +159,7 @@ type PrometheusFactory struct {
 	metricDomainFronting     prometheus.Counter
 	metricConcurrencyLimited prometheus.Counter
 	metricReplayAttacks      prometheus.Counter
-	
+
 	// Performance metrics (PHASE 3)
 	metricDNSCacheHits      prometheus.Counter
 	metricDNSCacheMisses    prometheus.Counter
@@ -269,7 +269,7 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 			Name:      MetricReplayAttacks,
 			Help:      "A number of detected replay attacks.",
 		}),
-		
+
 		// Performance metrics (PHASE 3)
 		metricDNSCacheHits: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: metricPrefix,
@@ -310,7 +310,7 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 	registry.MustRegister(factory.metricDomainFronting)
 	registry.MustRegister(factory.metricConcurrencyLimited)
 	registry.MustRegister(factory.metricReplayAttacks)
-	
+
 	// Register performance metrics (PHASE 3)
 	registry.MustRegister(factory.metricDNSCacheHits)
 	registry.MustRegister(factory.metricDNSCacheMisses)

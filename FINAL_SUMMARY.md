@@ -25,7 +25,7 @@ Performance улучшений: 5 major
 **1.3** Добавлены ProxyConfig с timeouts  
 **1.4** Реализован IP-based rate limiter
 
-### Результат:
+### Результат
 
 - ✅ DoS через panic trigger невозможен
 - ✅ CPU exhaustion защита (rate limiting)
@@ -43,7 +43,7 @@ Performance улучшений: 5 major
 **2.3** Anti-replay documentation  
 **2.4** Метрики для Stable Bloom Filter
 
-### Результат:
+### Результат
 
 - ✅ 100% соответствие MTProto 2.0 spec
 - ✅ Constant-time сравнения verified
@@ -60,14 +60,14 @@ Performance улучшений: 5 major
 **3.2** Prometheus метрики (DNS + rate limiter)  
 **3.3** Parallel DNS resolution (A+AAAA)
 
-### Результат:
+### Результат
 
 - ✅ 5-10x меньше DNS queries
 - ✅ 200 KB memory bound (vs unbounded)
 - ✅ 30-50% latency reduction
 - ✅ 80-90% cache hit rate
 
-### Осталось:
+### Осталось
 
 - ⏳ Zero-copy optimizations (Linux splice)
 - ⏳ Load testing (10k+ concurrent)
@@ -286,7 +286,7 @@ RateLimitBurst: 50,
 При обнаружении уязвимостей:
 
 1. **НЕ создавать** публичные issues
-2. Email: security@mtg.local (если есть)
+2. Email: <security@mtg.local> (если есть)
 3. Использовать GitHub Security Advisories
 4. PGP key для шифрования: [указать если есть]
 
