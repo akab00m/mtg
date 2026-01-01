@@ -20,6 +20,16 @@ func SetServerSocketOptions(conn net.Conn, bufferSize int) error {
 }
 
 func setCommonSocketOptions(conn *net.TCPConn) error {
+	// TCP_NODELAY - отключаем алгоритм Nagle для уменьшения latency
+	if err := conn.SetNoDelay(true); err != nil {
+		return fmt.Errorf("cannot set TCP_NODELAY: %w", err)
+	}
+
+	// Включаем TCP KeepAlive
+	if err := conn.SetKeepAlive(true); err != nil {
+		return fmt.Errorf("cannot enable TCP keepalive: %w", err)
+	}
+
 	if err := conn.SetKeepAlivePeriod(DefaultTCPKeepAlivePeriod); err != nil {
 		return fmt.Errorf("cannot set time period of TCP keepalive probes: %w", err)
 	}

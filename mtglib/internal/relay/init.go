@@ -1,7 +1,8 @@
 package relay
 
 const (
-	copyBufferSize = 64 * 1024
+	// Увеличен с 64KB до 256KB для лучшей пропускной способности
+	copyBufferSize = 256 * 1024
 )
 
 type Logger interface {
