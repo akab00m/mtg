@@ -128,6 +128,12 @@ func (n *network) dnsResolve(protocol, address string) ([]string, error) {
 	return ips, nil
 }
 
+// GetDNSCacheMetrics returns DNS cache statistics for monitoring.
+func (n *network) GetDNSCacheMetrics() (uint64, uint64, uint64, int) {
+	metrics := n.dns.GetCacheMetrics()
+	return metrics.Hits, metrics.Misses, metrics.Evictions, metrics.Size
+}
+
 // NewNetwork assembles an mtglib.Network compatible structure based on a
 // dialer and given params.
 //

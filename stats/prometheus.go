@@ -132,6 +132,10 @@ func (p prometheusProcessor) EventIPListSize(evt mtglib.EventIPListSize) {
 	p.factory.metricIPListSize.WithLabelValues(tag).Set(float64(evt.Size))
 }
 
+func (p prometheusProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
+	p.factory.UpdateDNSCacheMetrics(evt.DeltaHits, evt.DeltaMisses, evt.DeltaEvictions, evt.Size)
+}
+
 func (p prometheusProcessor) Shutdown() {
 	for k, v := range p.streams {
 		releaseStreamInfo(v)

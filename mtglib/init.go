@@ -124,6 +124,10 @@ type Network interface {
 	// MakeHTTPClient build an HTTP client with given dial function. If nothing is
 	// provided, then DialContext of this interface is going to be used.
 	MakeHTTPClient(func(ctx context.Context, network, address string) (essentials.Conn, error)) *http.Client
+
+	// GetDNSCacheMetrics returns DNS cache statistics for monitoring.
+	// Returns: hits, misses, evictions (uint64), size (int)
+	GetDNSCacheMetrics() (uint64, uint64, uint64, int)
 }
 
 // AntiReplayCache is an interface that is used to detect replay attacks based
