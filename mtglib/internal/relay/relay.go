@@ -41,7 +41,8 @@ func pump(log Logger, src, dst essentials.Conn, direction string) {
 	copyBuffer := acquireCopyBuffer()
 	defer releaseCopyBuffer(copyBuffer)
 
-	n, err := io.CopyBuffer(src, dst, *copyBuffer)
+	// Try zero-copy first (Linux splice), fallback to standard copy
+	n, err := copyWithZeroCopy(src, dst, *copyBuffer)
 
 	switch {
 	case err == nil:
