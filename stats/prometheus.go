@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/9seconds/mtg/v2/events"
 	"github.com/9seconds/mtg/v2/mtglib"
@@ -19,6 +20,7 @@ type prometheusProcessor struct {
 
 func (p prometheusProcessor) EventStart(evt mtglib.EventStart) {
 	info := acquireStreamInfo()
+	info.startTime = time.Now()
 
 	if evt.RemoteIP.To4() != nil {
 		info.tags[TagIPFamily] = TagIPFamilyIPv4
@@ -69,6 +71,14 @@ func (p prometheusProcessor) EventTraffic(evt mtglib.EventTraffic) {
 
 	direction := getDirection(evt.IsRead)
 
+	// Записываем время первого байта для TTFB метрики
+	if !info.hasFirstByte && evt.IsRead && evt.Traffic > 0 {
+		info.firstByteTime = time.Now()
+		info.hasFirstByte = true
+		ttfb := info.firstByteTime.Sub(info.startTime).Seconds()
+		p.factory.metricTTFB.Observe(ttfb)
+	}
+
 	if info.isDomainFronted {
 		p.factory.metricDomainFrontingTraffic.
 			WithLabelValues(direction).
@@ -90,6 +100,12 @@ func (p prometheusProcessor) EventFinish(evt mtglib.EventFinish) {
 		delete(p.streams, evt.StreamID())
 		releaseStreamInfo(info)
 	}()
+
+	// Записываем duration сессии для анализа throughput
+	if !info.startTime.IsZero() {
+		duration := time.Since(info.startTime).Seconds()
+		p.factory.metricSessionDuration.Observe(duration)
+	}
 
 	p.factory.metricClientConnections.
 		WithLabelValues(info.tags[TagIPFamily]).
@@ -170,6 +186,10 @@ type PrometheusFactory struct {
 	metricDNSCacheSize      prometheus.Gauge
 	metricDNSCacheEvictions prometheus.Counter
 	metricRateLimitRejects  prometheus.Counter
+
+	// Mobile optimization metrics (PHASE 4)
+	metricSessionDuration prometheus.Histogram // Длительность сессий для расчёта throughput
+	metricTTFB            prometheus.Histogram // Time To First Byte для latency анализа
 }
 
 // Make builds a new observer.
@@ -300,6 +320,20 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 			Name:      "rate_limit_rejects",
 			Help:      "Number of connections rejected due to rate limiting.",
 		}),
+
+		// Mobile optimization metrics (PHASE 4)
+		metricSessionDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: metricPrefix,
+			Name:      "session_duration_seconds",
+			Help:      "Duration of client sessions in seconds. Use with traffic metrics to calculate throughput.",
+			Buckets:   []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600},
+		}),
+		metricTTFB: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: metricPrefix,
+			Name:      "time_to_first_byte_seconds",
+			Help:      "Time from connection start to first byte received (download latency indicator).",
+			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+		}),
 	}
 
 	registry.MustRegister(factory.metricClientConnections)
@@ -321,6 +355,10 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 	registry.MustRegister(factory.metricDNSCacheSize)
 	registry.MustRegister(factory.metricDNSCacheEvictions)
 	registry.MustRegister(factory.metricRateLimitRejects)
+
+	// Register mobile optimization metrics (PHASE 4)
+	registry.MustRegister(factory.metricSessionDuration)
+	registry.MustRegister(factory.metricTTFB)
 
 	return factory
 }

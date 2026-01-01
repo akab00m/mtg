@@ -13,7 +13,9 @@ import (
 
 const (
 	// Увеличенные буферы сокетов для лучшей пропускной способности
-	socketBufferSize = 256 * 1024 // 256 KB
+	// Telegram клиенты (iOS/Android) используют 1MB буферы
+	// Согласование размеров улучшает throughput для мобильных устройств
+	socketBufferSize = 1024 * 1024 // 1 MB (было 256 KB)
 )
 
 func setSocketReuseAddrPort(conn syscall.RawConn) error {

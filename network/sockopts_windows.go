@@ -10,7 +10,8 @@ import (
 
 const (
 	// Windows socket buffer size
-	socketBufferSize = 256 * 1024 // 256 KB
+	// Увеличено до 1 MB для соответствия буферам Telegram клиентов (iOS/Android)
+	socketBufferSize = 1024 * 1024 // 1 MB (было 256 KB)
 )
 
 func setSocketReuseAddrPort(conn syscall.RawConn) error {

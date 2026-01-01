@@ -50,3 +50,23 @@ func setTCPQuickACK(conn net.Conn) {
 		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1) //nolint: nosnakecase,errcheck
 	})
 }
+
+// setTCPNotSentLowat устанавливает TCP_NOTSENT_LOWAT для снижения latency.
+// Уведомляет приложение когда в буфере отправки осталось меньше threshold байт.
+// Это позволяет быстрее реагировать и поддерживать низкую задержку.
+func setTCPNotSentLowat(conn net.Conn, threshold int) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		return
+	}
+
+	rawConn.Control(func(fd uintptr) { //nolint: errcheck
+		// TCP_NOTSENT_LOWAT = 25 на Linux (доступен с kernel 3.12)
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, 25, threshold) //nolint: errcheck
+	})
+}
