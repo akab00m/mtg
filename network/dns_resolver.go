@@ -6,28 +6,24 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 )
 
-const dnsResolverKeepTime = 10 * time.Minute
-
-type dnsResolverCacheEntry struct {
-	ips       []string
-	createdAt time.Time
-}
-
-func (c dnsResolverCacheEntry) Ok() bool {
-	return time.Since(c.createdAt) < dnsResolverKeepTime
-}
+const (
+	// DNS cache settings
+	defaultDNSCacheSize = 1000 // Max 1000 unique domains cached
+	defaultDNSTTL       = 300  // 5 minutes fallback TTL if DNS doesn't provide one
+	minDNSTTL           = 60   // Minimum 1 minute TTL (prevent abuse)
+	maxDNSTTL           = 3600 // Maximum 1 hour TTL (prevent stale data)
+)
 
 type dnsResolver struct {
 	dohServer  string
 	httpClient *http.Client
-	cache      map[string]dnsResolverCacheEntry
-	cacheMutex sync.RWMutex
+	cache      *LRUDNSCache
+	cleanupStop chan struct{} // Stop channel for cleanup goroutine
 }
 
 // doQuery выполняет DNS-over-HTTPS запрос
@@ -79,29 +75,30 @@ func (d *dnsResolver) doQuery(hostname string, qtype uint16) ([]dns.RR, error) {
 func (d *dnsResolver) LookupA(hostname string) []string {
 	key := "\x00" + hostname
 
-	d.cacheMutex.RLock()
-	entry, ok := d.cache[key]
-	d.cacheMutex.RUnlock()
-
-	if ok && entry.Ok() {
-		return entry.ips
+	// Check cache first
+	if cached := d.cache.Get(key); cached != nil {
+		return cached.IPs
 	}
 
+	// Cache miss - perform DNS query
 	var ips []string
+	var ttl uint32 = defaultDNSTTL
 
 	if recs, err := d.doQuery(hostname, dns.TypeA); err == nil {
 		for _, rr := range recs {
 			if a, ok := rr.(*dns.A); ok {
 				ips = append(ips, a.A.String())
+				// Extract TTL from DNS response
+				if rr.Header().Ttl > 0 {
+					ttl = normalizeTTL(rr.Header().Ttl)
+				}
 			}
 		}
 
-		d.cacheMutex.Lock()
-		d.cache[key] = dnsResolverCacheEntry{
-			ips:       ips,
-			createdAt: time.Now(),
+		// Store in cache with TTL
+		if len(ips) > 0 {
+			d.cache.Set(key, ips, ttl)
 		}
-		d.cacheMutex.Unlock()
 	}
 
 	return ips
@@ -110,32 +107,49 @@ func (d *dnsResolver) LookupA(hostname string) []string {
 func (d *dnsResolver) LookupAAAA(hostname string) []string {
 	key := "\x01" + hostname
 
-	d.cacheMutex.RLock()
-	entry, ok := d.cache[key]
-	d.cacheMutex.RUnlock()
-
-	if ok && entry.Ok() {
-		return entry.ips
+	// Check cache first
+	if cached := d.cache.Get(key); cached != nil {
+		return cached.IPs
 	}
 
+	// Cache miss - perform DNS query
 	var ips []string
+	var ttl uint32 = defaultDNSTTL
 
 	if recs, err := d.doQuery(hostname, dns.TypeAAAA); err == nil {
 		for _, rr := range recs {
 			if aaaa, ok := rr.(*dns.AAAA); ok {
 				ips = append(ips, aaaa.AAAA.String())
+				// Extract TTL from DNS response
+				if rr.Header().Ttl > 0 {
+					ttl = normalizeTTL(rr.Header().Ttl)
+				}
 			}
 		}
 
-		d.cacheMutex.Lock()
-		d.cache[key] = dnsResolverCacheEntry{
-			ips:       ips,
-			createdAt: time.Now(),
+		// Store in cache with TTL
+		if len(ips) > 0 {
+			d.cache.Set(key, ips, ttl)
 		}
-		d.cacheMutex.Unlock()
 	}
 
 	return ips
+}
+
+// normalizeTTL ensures TTL is within acceptable bounds
+func normalizeTTL(ttl uint32) uint32 {
+	if ttl < minDNSTTL {
+		return minDNSTTL
+	}
+	if ttl > maxDNSTTL {
+		return maxDNSTTL
+	}
+	return ttl
+}
+
+// GetCacheMetrics returns DNS cache statistics for monitoring
+func (d *dnsResolver) GetCacheMetrics() DNSCacheMetrics {
+	return d.cache.GetMetrics()
 }
 
 func newDNSResolver(hostname string, httpClient *http.Client) *dnsResolver {
@@ -144,9 +158,16 @@ func newDNSResolver(hostname string, httpClient *http.Client) *dnsResolver {
 		hostname = fmt.Sprintf("[%s]", hostname)
 	}
 
-	return &dnsResolver{
+	cache := NewLRUDNSCache(defaultDNSCacheSize)
+	
+	resolver := &dnsResolver{
 		dohServer:  hostname,
 		httpClient: httpClient,
-		cache:      map[string]dnsResolverCacheEntry{},
+		cache:      cache,
 	}
+	
+	// Start background cleanup of expired entries every 5 minutes
+	resolver.cleanupStop = cache.StartCleanupLoop(5 * time.Minute)
+	
+	return resolver
 }
