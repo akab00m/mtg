@@ -35,7 +35,9 @@ func (suite *StreamContextTestSuite) SetupTest() {
 	}
 	suite.connMock.On("RemoteAddr").Return(addr)
 
-	suite.ctx = newStreamContext(ctx, suite.logger, suite.connMock)
+	streamCtx, err := newStreamContext(ctx, suite.logger, suite.connMock)
+	suite.NoError(err)
+	suite.ctx = streamCtx
 }
 
 func (suite *StreamContextTestSuite) TearDownTest() {

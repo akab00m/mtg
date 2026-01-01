@@ -29,6 +29,8 @@ type Proxy struct {
 	domainFrontingPort       int
 	workerPool               *ants.PoolWithFunc
 	telegram                 *telegram.Telegram
+	config                   ProxyConfig
+	rateLimiter              *RateLimiter
 
 	secret          Secret
 	network         Network
@@ -50,8 +52,30 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 	p.streamWaitGroup.Add(1)
 	defer p.streamWaitGroup.Done()
 
-	ctx := newStreamContext(p.ctx, p.logger, conn)
+	// Rate limiting check BEFORE creating stream context
+	ipAddr := conn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
+	if p.rateLimiter != nil && !p.rateLimiter.Allow(ipAddr) {
+		p.logger.BindStr("ip", ipAddr.String()).Warning("Rate limited")
+		p.eventStream.Send(p.ctx, NewEventConcurrencyLimited())
+		conn.Close()
+
+		return
+	}
+
+	ctx, err := newStreamContext(p.ctx, p.logger, conn)
+	if err != nil {
+		p.logger.WarningError("cannot create stream context", err)
+		conn.Close()
+
+		return
+	}
 	defer ctx.Close()
+
+	// Set handshake deadline on connection
+	if p.config.HandshakeTimeout > 0 {
+		conn.SetDeadline(time.Now().Add(p.config.HandshakeTimeout))
+		defer conn.SetDeadline(time.Time{}) // Clear deadline after handshake
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -298,6 +322,20 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Get config or use defaults
+	config := opts.getConfig()
+
+	// Create rate limiter if enabled
+	var rateLimiter *RateLimiter
+	if opts.getRateLimitPerSecond() > 0 {
+		rateLimiter = NewRateLimiter(
+			opts.getRateLimitPerSecond(),
+			opts.getRateLimitBurst(),
+			time.Minute, // cleanup every minute
+		)
+	}
+
 	proxy := &Proxy{
 		ctx:                      ctx,
 		ctxCancel:                cancel,
@@ -312,6 +350,8 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		tolerateTimeSkewness:     opts.getTolerateTimeSkewness(),
 		allowFallbackOnUnknownDC: opts.AllowFallbackOnUnknownDC,
 		telegram:                 tg,
+		config:                   config,
+		rateLimiter:              rateLimiter,
 	}
 
 	pool, err := ants.NewPoolWithFunc(opts.getConcurrency(),
@@ -321,7 +361,7 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		ants.WithLogger(opts.getLogger("ants")),
 		ants.WithNonblocking(true))
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("cannot create worker pool: %w", err)
 	}
 
 	proxy.workerPool = pool
