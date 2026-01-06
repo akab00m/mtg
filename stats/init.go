@@ -96,6 +96,26 @@ const (
 	//       ip_list | 'allowlist' or 'blocklist'
 	MetricIPListSize = "iplist_size"
 
+	// MetricDNSCacheSize defines a metric for the current size of the DNS cache.
+	//
+	//     Type: gauge
+	MetricDNSCacheSize = "dns_cache_size"
+
+	// MetricDNSCacheHits defines a metric for the number of DNS cache hits.
+	//
+	//     Type: counter
+	MetricDNSCacheHits = "dns_cache_hits"
+
+	// MetricDNSCacheMisses defines a metric for the number of DNS cache misses.
+	//
+	//     Type: counter
+	MetricDNSCacheMisses = "dns_cache_misses"
+
+	// MetricDNSCacheEvictions defines a metric for the number of DNS cache evictions.
+	//
+	//     Type: counter
+	MetricDNSCacheEvictions = "dns_cache_evictions"
+
 	// TagIPFamily defines a name of the 'ip_family' tag and all values.
 	TagIPFamily = "ip_family"
 
