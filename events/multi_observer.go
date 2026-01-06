@@ -145,6 +145,21 @@ func (m multiObserver) EventIPListSize(evt mtglib.EventIPListSize) {
 	wg.Wait()
 }
 
+func (m multiObserver) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(m.observers))
+
+	for _, v := range m.observers {
+		go func(obs Observer) {
+			defer wg.Done()
+
+			obs.EventDNSCacheMetrics(evt)
+		}(v)
+	}
+
+	wg.Wait()
+}
+
 func (m multiObserver) Shutdown() {
 	for _, v := range m.observers {
 		v.Shutdown()

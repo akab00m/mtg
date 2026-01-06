@@ -135,6 +135,13 @@ func (s statsdProcessor) EventIPListSize(evt mtglib.EventIPListSize) {
 	s.client.Gauge(MetricIPListSize, int64(evt.Size), statsd.StringTag(TagIPList, tag))
 }
 
+func (s statsdProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
+	s.client.Gauge(MetricDNSCacheSize, int64(evt.Size))
+	s.client.Incr(MetricDNSCacheHits, int64(evt.DeltaHits))
+	s.client.Incr(MetricDNSCacheMisses, int64(evt.DeltaMisses))
+	s.client.Incr(MetricDNSCacheEvictions, int64(evt.DeltaEvictions))
+}
+
 func (s statsdProcessor) Shutdown() {
 	events := make([]mtglib.EventFinish, 0, len(s.streams))
 
