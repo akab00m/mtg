@@ -67,9 +67,9 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		setTCPQuickACK(src)
 		setTCPQuickACK(dst)
 
-		// TCP_NOTSENT_LOWAT - 2KB для Telegram (мелкие пакеты 8-16KB)
-		// Уведомляет когда буфер почти пуст, улучшает responsiveness
-		setTCPNotSentLowat(dst, 2048)
+		// TCP_NOTSENT_LOWAT - 4KB (баланс между responsiveness и throughput)
+		// Слишком низкое значение может снижать throughput
+		setTCPNotSentLowat(dst, 4096)
 	} else {
 		// Upload: client -> telegram
 		// Также применяем QUICKACK для снижения latency в обоих направлениях
