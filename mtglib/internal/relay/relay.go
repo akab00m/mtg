@@ -31,6 +31,10 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 
 	closeChan := make(chan struct{})
 
+	// Оптимизация TCP для всех соединений - критично для множества мелких пакетов
+	setTCPNoDelay(telegramConn) // Upload: client -> telegram
+	setTCPNoDelay(clientConn)   // Download: telegram -> client
+
 	// Upload: client -> telegram (фоновый)
 	go func() {
 		defer close(closeChan)
@@ -38,9 +42,8 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	}()
 
 	// Download: telegram -> client (приоритетный)
-	// Для download устанавливаем TCP_QUICKACK на клиентском соединении
-	// чтобы ACK отправлялись быстрее и не задерживали отправку данных
-	setTCPQuickACK(clientConn)
+	// Для download настраиваем TCP для минимальной latency
+	setTCPQuickACK(clientConn) // Немедленные ACK
 
 	pump(log, clientConn, telegramConn, "telegram -> client", dirDownload)
 
@@ -54,23 +57,24 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 	copyBuffer := acquireCopyBuffer()
 	defer releaseCopyBuffer(copyBuffer)
 
-	// Для download применяем оптимизации
+	// Оптимизации TCP для обоих направлений (много мелких пакетов)
+	// TCP_NODELAY уже установлен в Relay(), здесь дополнительные настройки
+	
 	if dir == dirDownload {
-		// ОТКЛЮЧАЕМ TCP_CORK для Telegram - он использует много мелких запросов
-		// TCP_CORK задерживает отправку, что плохо для latency
-		// _ = setTCPCork(dst, true)
-		// defer setTCPCork(dst, false) //nolint: errcheck
-
-		// Периодически сбрасываем TCP_QUICKACK на source (telegram)
-		// для более быстрой доставки ACK
-		setTCPQuickACK(src)
+		// Download: telegram -> client (приоритетное направление)
 		
-		// Также на destination для немедленных ACK
+		// TCP_QUICKACK - немедленные ACK для снижения latency
+		setTCPQuickACK(src)
 		setTCPQuickACK(dst)
 
-		// TCP_NOTSENT_LOWAT - уменьшаем до 4KB для Telegram (много мелких пакетов)
-		// Это улучшает latency для множественных коротких соединений
-		setTCPNotSentLowat(dst, 4096)
+		// TCP_NOTSENT_LOWAT - 2KB для Telegram (мелкие пакеты 8-16KB)
+		// Уведомляет когда буфер почти пуст, улучшает responsiveness
+		setTCPNotSentLowat(dst, 2048)
+	} else {
+		// Upload: client -> telegram
+		// Также применяем QUICKACK для снижения latency в обоих направлениях
+		setTCPQuickACK(src)
+		setTCPQuickACK(dst)
 	}
 
 	// Try zero-copy first (Linux splice), fallback to standard copy
