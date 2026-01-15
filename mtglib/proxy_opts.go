@@ -201,7 +201,7 @@ func (p ProxyOpts) getConfig() ProxyConfig {
 
 func (p ProxyOpts) getRateLimitPerSecond() rate.Limit {
 	if p.RateLimitPerSecond == 0 {
-		return 10 // default: 10 requests per second
+		return 0 // ОТКЛЮЧЕНО: Traefik проксирует все соединения с одного IP
 	}
 
 	return rate.Limit(p.RateLimitPerSecond)
