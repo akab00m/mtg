@@ -56,18 +56,21 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 
 	// Для download применяем оптимизации
 	if dir == dirDownload {
-		// Включаем TCP_CORK на destination (клиент) для batching пакетов
-		// Это уменьшает количество мелких TCP пакетов и улучшает throughput
-		_ = setTCPCork(dst, true)
-		defer setTCPCork(dst, false) //nolint: errcheck
+		// ОТКЛЮЧАЕМ TCP_CORK для Telegram - он использует много мелких запросов
+		// TCP_CORK задерживает отправку, что плохо для latency
+		// _ = setTCPCork(dst, true)
+		// defer setTCPCork(dst, false) //nolint: errcheck
 
 		// Периодически сбрасываем TCP_QUICKACK на source (telegram)
 		// для более быстрой доставки ACK
 		setTCPQuickACK(src)
+		
+		// Также на destination для немедленных ACK
+		setTCPQuickACK(dst)
 
-		// TCP_NOTSENT_LOWAT снижает latency - уведомляет когда буфер отправки почти пуст
-		// 16KB threshold оптимален для мобильных сетей с высоким RTT
-		setTCPNotSentLowat(dst, 16384)
+		// TCP_NOTSENT_LOWAT - уменьшаем до 4KB для Telegram (много мелких пакетов)
+		// Это улучшает latency для множественных коротких соединений
+		setTCPNotSentLowat(dst, 4096)
 	}
 
 	// Try zero-copy first (Linux splice), fallback to standard copy
