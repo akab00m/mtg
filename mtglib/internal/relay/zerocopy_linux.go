@@ -117,11 +117,13 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 
 // copyWithZeroCopy пытается zero-copy, fallback на io.CopyBuffer
 func copyWithZeroCopy(src, dst essentials.Conn, buf []byte) (int64, error) {
-	n, err := zeroCopyRelay(src, dst)
-	if n >= 0 {
-		return n, err
-	}
+	// ВРЕМЕННО ОТКЛЮЧЕНО: zero-copy splice может вызывать проблемы с производительностью
+	// при множественных коротких соединениях Telegram
+	// n, err := zeroCopyRelay(src, dst)
+	// if n >= 0 {
+	// 	return n, err
+	// }
 
-	// Fallback to standard copy
+	// Используем стандартный copy - более надёжно для Telegram
 	return io.CopyBuffer(dst, src, buf)
 }

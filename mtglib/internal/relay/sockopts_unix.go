@@ -51,6 +51,18 @@ func setTCPQuickACK(conn net.Conn) {
 	})
 }
 
+// setTCPNoDelay отключает алгоритм Nagle для немедленной отправки мелких пакетов.
+// Критично для Telegram где много коротких сообщений.
+func setTCPNoDelay(conn net.Conn) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+
+	// SetNoDelay отключает buffering мелких пакетов
+	_ = tcpConn.SetNoDelay(true)
+}
+
 // setTCPNotSentLowat устанавливает TCP_NOTSENT_LOWAT для снижения latency.
 // Уведомляет приложение когда в буфере отправки осталось меньше threshold байт.
 // Это позволяет быстрее реагировать и поддерживать низкую задержку.
