@@ -129,7 +129,7 @@ func configureTCPKeepalive(conn net.Conn) {
 
 	// Включаем keepalive
 	_ = tcpConn.SetKeepAlive(true)
-	
+
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
 		return

@@ -35,20 +35,6 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	setTCPNoDelay(telegramConn) // Upload: client -> telegram
 	setTCPNoDelay(clientConn)   // Download: telegram -> client
 
-	// FIX: Проблемы с некоторыми провайдерами (долгое соединение)
-	// 1. Уменьшаем MSS для обхода MTU проблем (1400 безопасно для большинства сетей)
-	setTCPMaxSegSize(clientConn, 1400)
-	setTCPMaxSegSize(telegramConn, 1400)
-	
-	// 2. TCP USER_TIMEOUT - быстрое обнаружение мертвых соединений (30 секунд)
-	// Если за 30 сек нет ACK - соединение считается мертвым
-	setTCPUserTimeout(clientConn, 30000)    // 30 секунд
-	setTCPUserTimeout(telegramConn, 30000)
-	
-	// 3. Агрессивный keepalive для обнаружения проблем
-	configureTCPKeepalive(clientConn)
-	configureTCPKeepalive(telegramConn)
-
 	// Upload: client -> telegram (фоновый)
 	go func() {
 		defer close(closeChan)
