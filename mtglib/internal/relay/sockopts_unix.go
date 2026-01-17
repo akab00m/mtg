@@ -82,3 +82,65 @@ func setTCPNotSentLowat(conn net.Conn, threshold int) {
 		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, 25, threshold) //nolint: errcheck
 	})
 }
+
+// setTCPMaxSegSize устанавливает максимальный размер TCP сегмента.
+// Помогает обойти MTU проблемы на некоторых провайдерах.
+func setTCPMaxSegSize(conn net.Conn, mss int) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		return
+	}
+
+	rawConn.Control(func(fd uintptr) { //nolint: errcheck
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG, mss) //nolint: errcheck
+	})
+}
+
+// setTCPUserTimeout устанавливает таймаут для обнаружения мертвых соединений.
+// После этого времени без ACK соединение будет закрыто.
+func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		return
+	}
+
+	rawConn.Control(func(fd uintptr) { //nolint: errcheck
+		// TCP_USER_TIMEOUT = 18 на Linux (доступен с kernel 2.6.37)
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, 18, timeoutMs) //nolint: errcheck
+	})
+}
+
+// configureTCPKeepalive настраивает TCP keepalive для быстрого обнаружения мертвых соединений.
+func configureTCPKeepalive(conn net.Conn) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+
+	// Включаем keepalive
+	_ = tcpConn.SetKeepAlive(true)
+	
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		return
+	}
+
+	rawConn.Control(func(fd uintptr) { //nolint: errcheck
+		// Интервал между keepalive пакетами: 10 секунд
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_KEEPINTVL, 10) //nolint: errcheck
+		// Время до первого keepalive: 30 секунд
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_KEEPIDLE, 30) //nolint: errcheck
+		// Количество попыток: 3
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_KEEPCNT, 3) //nolint: errcheck
+	})
+}
