@@ -45,3 +45,36 @@ func setTCPQuickACK(conn net.Conn) {
 		)
 	})
 }
+
+// setTCPNoDelay отключает алгоритм Nagle.
+func setTCPNoDelay(conn net.Conn) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	_ = tcpConn.SetNoDelay(true)
+}
+
+// setTCPNotSentLowat не поддерживается на Windows.
+func setTCPNotSentLowat(conn net.Conn, threshold int) {
+	// Not supported on Windows
+}
+
+// setTCPMaxSegSize не поддерживается на Windows.
+func setTCPMaxSegSize(conn net.Conn, mss int) {
+	// Not supported on Windows
+}
+
+// setTCPUserTimeout не поддерживается на Windows.
+func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
+	// Not supported on Windows
+}
+
+// configureTCPKeepalive настраивает keepalive на Windows.
+func configureTCPKeepalive(conn net.Conn) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	_ = tcpConn.SetKeepAlive(true)
+}
