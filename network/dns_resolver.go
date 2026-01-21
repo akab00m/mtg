@@ -85,21 +85,25 @@ func (d *dnsResolver) LookupA(hostname string) []string {
 	var ips []string
 	var ttl uint32 = defaultDNSTTL
 
-	if recs, err := d.doQuery(hostname, dns.TypeA); err == nil {
-		for _, rr := range recs {
-			if a, ok := rr.(*dns.A); ok {
-				ips = append(ips, a.A.String())
-				// Extract TTL from DNS response
-				if rr.Header().Ttl > 0 {
-					ttl = normalizeTTL(rr.Header().Ttl)
-				}
+	recs, err := d.doQuery(hostname, dns.TypeA)
+	if err != nil {
+		logDNSError("LookupA", hostname, err)
+		return ips
+	}
+
+	for _, rr := range recs {
+		if a, ok := rr.(*dns.A); ok {
+			ips = append(ips, a.A.String())
+			// Extract TTL from DNS response
+			if rr.Header().Ttl > 0 {
+				ttl = normalizeTTL(rr.Header().Ttl)
 			}
 		}
+	}
 
-		// Store in cache with TTL
-		if len(ips) > 0 {
-			d.cache.Set(key, ips, ttl)
-		}
+	// Store in cache with TTL
+	if len(ips) > 0 {
+		d.cache.Set(key, ips, ttl)
 	}
 
 	return ips
@@ -117,21 +121,25 @@ func (d *dnsResolver) LookupAAAA(hostname string) []string {
 	var ips []string
 	var ttl uint32 = defaultDNSTTL
 
-	if recs, err := d.doQuery(hostname, dns.TypeAAAA); err == nil {
-		for _, rr := range recs {
-			if aaaa, ok := rr.(*dns.AAAA); ok {
-				ips = append(ips, aaaa.AAAA.String())
-				// Extract TTL from DNS response
-				if rr.Header().Ttl > 0 {
-					ttl = normalizeTTL(rr.Header().Ttl)
-				}
+	recs, err := d.doQuery(hostname, dns.TypeAAAA)
+	if err != nil {
+		logDNSError("LookupAAAA", hostname, err)
+		return ips
+	}
+
+	for _, rr := range recs {
+		if aaaa, ok := rr.(*dns.AAAA); ok {
+			ips = append(ips, aaaa.AAAA.String())
+			// Extract TTL from DNS response
+			if rr.Header().Ttl > 0 {
+				ttl = normalizeTTL(rr.Header().Ttl)
 			}
 		}
+	}
 
-		// Store in cache with TTL
-		if len(ips) > 0 {
-			d.cache.Set(key, ips, ttl)
-		}
+	// Store in cache with TTL
+	if len(ips) > 0 {
+		d.cache.Set(key, ips, ttl)
 	}
 
 	return ips

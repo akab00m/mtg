@@ -8,7 +8,9 @@ type addressPool struct {
 }
 
 func (a addressPool) isValidDC(dc int) bool {
-	return dc > 0 && dc <= len(a.v4) && dc <= len(a.v6)
+	// Telegram официально поддерживает только DC 1-5
+	// DC > 5 (например, 203) не существуют и должны быть отклонены
+	return dc > 0 && dc <= 5 && dc <= len(a.v4) && dc <= len(a.v6)
 }
 
 func (a addressPool) getRandomDC() int {
@@ -24,7 +26,8 @@ func (a addressPool) getV6(dc int) []tgAddr {
 }
 
 func (a addressPool) get(addresses [][]tgAddr, dc int) []tgAddr {
-	if dc < 0 || dc >= len(addresses) {
+	// Дополнительная проверка: игнорировать DC > 5 (203, 999, и т.д.)
+	if dc < 0 || dc >= len(addresses) || dc >= 5 {
 		return nil
 	}
 
