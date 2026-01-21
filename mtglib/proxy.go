@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,7 +102,10 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 	}
 
 	if err := p.doTelegramCall(ctx); err != nil {
-		p.logger.WarningError("cannot dial to telegram", err)
+		// Не логировать спам для несуществующих DC (203, 999 и т.д.)
+		if !strings.Contains(err.Error(), "invalid DC") {
+			p.logger.WarningError("cannot dial to telegram", err)
+		}
 
 		return
 	}
@@ -245,11 +249,17 @@ func (p *Proxy) doObfuscated2Handshake(ctx *streamContext) error {
 func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	dc := ctx.dc
 
-	if p.allowFallbackOnUnknownDC && !p.telegram.IsKnownDC(dc) {
-		dc = p.telegram.GetFallbackDC()
-		ctx.logger = ctx.logger.BindInt("fallback_dc", dc)
-
-		ctx.logger.Warning("unknown DC, fallbacks")
+	// Telegram официально поддерживает только DC 1-5
+	// Отклонять запросы к несуществующим DC (203, 999 и т.д.) без логирования
+	if !p.telegram.IsKnownDC(dc) {
+		if p.allowFallbackOnUnknownDC {
+			dc = p.telegram.GetFallbackDC()
+			ctx.logger = ctx.logger.BindInt("fallback_dc", dc)
+			ctx.logger.Warning("unknown DC, fallbacks")
+		} else {
+			// Silent reject для DC > 5 - избегаем спама в логах
+			return fmt.Errorf("invalid DC %d (only DC 1-5 are supported)", dc)
+		}
 	}
 
 	conn, err := p.telegram.Dial(ctx, dc)
