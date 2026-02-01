@@ -190,6 +190,9 @@ type PrometheusFactory struct {
 	// Mobile optimization metrics (PHASE 4)
 	metricSessionDuration prometheus.Histogram // Длительность сессий для расчёта throughput
 	metricTTFB            prometheus.Histogram // Time To First Byte для latency анализа
+
+	// Build info metric
+	metricBuildInfo *prometheus.GaugeVec
 }
 
 // Make builds a new observer.
@@ -227,7 +230,7 @@ func (p *PrometheusFactory) IncrementRateLimitRejects() {
 
 // NewPrometheus builds an events.ObserverFactory which can serve HTTP
 // endpoint with Prometheus scrape data.
-func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint: funlen
+func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { //nolint: funlen
 	registry := prometheus.NewPedanticRegistry()
 	httpHandler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
@@ -334,6 +337,13 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 			Help:      "Time from connection start to first byte received (download latency indicator).",
 			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
 		}),
+
+		// Build info metric
+		metricBuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metricPrefix,
+			Name:      "build_info",
+			Help:      "Build information about mtg proxy.",
+		}, []string{"version"}),
 	}
 
 	registry.MustRegister(factory.metricClientConnections)
@@ -359,6 +369,10 @@ func NewPrometheus(metricPrefix, httpPath string) *PrometheusFactory { //nolint:
 	// Register mobile optimization metrics (PHASE 4)
 	registry.MustRegister(factory.metricSessionDuration)
 	registry.MustRegister(factory.metricTTFB)
+
+	// Register build info metric and set version
+	registry.MustRegister(factory.metricBuildInfo)
+	factory.metricBuildInfo.WithLabelValues(version).Set(1)
 
 	return factory
 }

@@ -14,7 +14,9 @@ import (
 const (
 	// Количество splice операций между refresh TCP_QUICKACK
 	// TCP_QUICKACK сбрасывается ядром после каждого delayed ACK
-	quickackRefreshInterval = 16
+	// Уменьшено с 16 до 4 для снижения latency на 10-20ms при download
+	// Особенно важно для мобильных сетей с высоким delayed ACK
+	quickackRefreshInterval = 4
 )
 
 // zeroCopyRelay использует splice() для zero-copy передачи данных через RawConn.

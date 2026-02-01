@@ -45,6 +45,10 @@ func (o *ObserverMock) EventIPListSize(evt mtglib.EventIPListSize) {
 	o.Called(evt)
 }
 
+func (o *ObserverMock) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
+	o.Called(evt)
+}
+
 func (o *ObserverMock) Shutdown() {
 	o.Called()
 }

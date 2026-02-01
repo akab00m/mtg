@@ -27,3 +27,10 @@ commit.message.txt
 *.tmp
 *.bak
 *.backup
+
+# Project documentation (local only)
+TODO*.md
+project_status.md
+
+# MCP/Serena
+.serena/

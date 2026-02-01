@@ -42,7 +42,7 @@ func (suite *PrometheusTestSuite) Get() (string, error) {
 
 func (suite *PrometheusTestSuite) SetupTest() {
 	suite.httpListener, _ = net.Listen("tcp", "127.0.0.1:0")
-	suite.factory = stats.NewPrometheus("mtg", "/")
+	suite.factory = stats.NewPrometheus("mtg", "/", "test-version")
 	suite.prometheus = suite.factory.Make()
 
 	go suite.factory.Serve(suite.httpListener) //nolint: errcheck
@@ -190,6 +190,13 @@ func (suite *PrometheusTestSuite) TestEventIPListSize() {
 	suite.NoError(err)
 	suite.Contains(data, `mtg_iplist_size{ip_list="allowlist"} 10`)
 	suite.Contains(data, `mtg_iplist_size{ip_list="blocklist"} 3`)
+}
+
+func (suite *PrometheusTestSuite) TestBuildInfo() {
+	// Build info should be set immediately on creation
+	data, err := suite.Get()
+	suite.NoError(err)
+	suite.Contains(data, `mtg_build_info{version="test-version"} 1`)
 }
 
 func TestPrometheus(t *testing.T) {

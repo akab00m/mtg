@@ -9,6 +9,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// TCP socket options константы для Linux
+// Эти значения не экспортированы в golang.org/x/sys/unix
+const (
+	// TCP_NOTSENT_LOWAT - уведомляет приложение когда в буфере
+	// отправки осталось меньше threshold байт.
+	// Доступен с kernel 3.12
+	TCP_NOTSENT_LOWAT = 25
+
+	// TCP_USER_TIMEOUT - таймаут для обнаружения мертвых соединений.
+	// Соединение закрывается если нет ACK в течение указанного времени.
+	// Доступен с kernel 2.6.37
+	TCP_USER_TIMEOUT = 18
+)
+
 // setTCPCork включает/выключает TCP_CORK для batching пакетов.
 // TCP_CORK заставляет ядро накапливать данные и отправлять их большими пакетами.
 func setTCPCork(conn net.Conn, cork bool) error {
@@ -78,8 +92,7 @@ func setTCPNotSentLowat(conn net.Conn, threshold int) {
 	}
 
 	rawConn.Control(func(fd uintptr) { //nolint: errcheck
-		// TCP_NOTSENT_LOWAT = 25 на Linux (доступен с kernel 3.12)
-		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, 25, threshold) //nolint: errcheck
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_NOTSENT_LOWAT, threshold) //nolint: errcheck
 	})
 }
 
@@ -115,8 +128,7 @@ func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
 	}
 
 	rawConn.Control(func(fd uintptr) { //nolint: errcheck
-		// TCP_USER_TIMEOUT = 18 на Linux (доступен с kernel 2.6.37)
-		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, 18, timeoutMs) //nolint: errcheck
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_USER_TIMEOUT, timeoutMs) //nolint: errcheck
 	})
 }
 

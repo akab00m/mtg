@@ -4,32 +4,71 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/9seconds/mtg/v2/essentials"
 )
 
 type Telegram struct {
-	dialer   Dialer
-	preferIP preferIP
-	pool     addressPool
+	dialer        Dialer
+	preferIP      preferIP
+	pool          addressPool
+	connPool      *ConnectionPoolManager // Connection pool для переиспользования соединений
+	useConnPool   bool                   // Включен ли connection pooling
+	healthChecker *DCHealthChecker       // DC health monitoring
 }
 
-func (t Telegram) Dial(ctx context.Context, dc int) (essentials.Conn, error) {
-	var addresses []tgAddr
+// Dial создаёт или переиспользует соединение к DC.
+// Если включен connection pooling, соединение будет взято из пула.
+// Возвращённое соединение при закрытии вернётся в пул автоматически.
+func (t *Telegram) Dial(ctx context.Context, dc int) (essentials.Conn, error) {
+	addresses := t.getAddresses(dc)
 
-	switch t.preferIP {
-	case preferIPOnlyIPv4:
-		addresses = t.pool.getV4(dc)
-	case preferIPOnlyIPv6:
-		addresses = t.pool.getV6(dc)
-	case preferIPPreferIPv4:
-		addresses = append(t.pool.getV4(dc), t.pool.getV6(dc)...)
-	case preferIPPreferIPv6:
-		addresses = append(t.pool.getV6(dc), t.pool.getV4(dc)...)
+	// Используем connection pool если включен
+	if t.useConnPool && t.connPool != nil {
+		conn, err := t.connPool.Get(ctx, dc, addresses)
+		if err != nil {
+			return nil, fmt.Errorf("cannot get connection from pool for dc %d: %w", dc, err)
+		}
+
+		// Оборачиваем для автоматического возврата в пул
+		return &PooledConn{
+			Conn:    conn,
+			dc:      dc,
+			manager: t.connPool,
+		}, nil
 	}
 
-	var conn essentials.Conn
+	// Fallback: прямое соединение без pooling
+	return t.dialDirect(ctx, addresses, dc)
+}
 
+// DialDirect создаёт соединение напрямую, минуя пул.
+// Используется когда pooling отключён или для одноразовых соединений.
+func (t *Telegram) DialDirect(ctx context.Context, dc int) (essentials.Conn, error) {
+	addresses := t.getAddresses(dc)
+	return t.dialDirect(ctx, addresses, dc)
+}
+
+// getAddresses возвращает адреса для DC согласно IP preference.
+func (t *Telegram) getAddresses(dc int) []tgAddr {
+	switch t.preferIP {
+	case preferIPOnlyIPv4:
+		return t.pool.getV4(dc)
+	case preferIPOnlyIPv6:
+		return t.pool.getV6(dc)
+	case preferIPPreferIPv4:
+		return append(t.pool.getV4(dc), t.pool.getV6(dc)...)
+	case preferIPPreferIPv6:
+		return append(t.pool.getV6(dc), t.pool.getV4(dc)...)
+	default:
+		return t.pool.getV4(dc)
+	}
+}
+
+// dialDirect выполняет непосредственное подключение к DC.
+func (t *Telegram) dialDirect(ctx context.Context, addresses []tgAddr, dc int) (essentials.Conn, error) {
+	var conn essentials.Conn
 	err := errNoAddresses
 
 	for _, v := range addresses {
@@ -42,15 +81,96 @@ func (t Telegram) Dial(ctx context.Context, dc int) (essentials.Conn, error) {
 	return nil, fmt.Errorf("cannot dial to %d dc: %w", dc, err)
 }
 
-func (t Telegram) IsKnownDC(dc int) bool {
+func (t *Telegram) IsKnownDC(dc int) bool {
 	return t.pool.isValidDC(dc)
 }
 
-func (t Telegram) GetFallbackDC() int {
+func (t *Telegram) GetFallbackDC() int {
 	return t.pool.getRandomDC()
 }
 
-func New(dialer Dialer, ipPreference string, useTestDCs bool) (*Telegram, error) {
+// GetFallbackDCExcluding returns a random DC excluding the specified one.
+// Used when a specific DC is unavailable.
+func (t *Telegram) GetFallbackDCExcluding(exclude int) int {
+	return t.pool.getRandomDCExcluding(exclude)
+}
+
+// Close закрывает все пулы соединений и останавливает health checker.
+func (t *Telegram) Close() error {
+	if t.healthChecker != nil {
+		t.healthChecker.Stop()
+	}
+	if t.connPool != nil {
+		return t.connPool.Close()
+	}
+	return nil
+}
+
+// PoolStats возвращает статистику пулов соединений.
+// Возвращает nil если pooling отключен.
+func (t *Telegram) PoolStats() []PoolStats {
+	if t.connPool == nil {
+		return nil
+	}
+	return t.connPool.AllStats()
+}
+
+// DCHealthStatus возвращает статус здоровья всех DC.
+// Возвращает nil если health check отключен.
+func (t *Telegram) DCHealthStatus() []DCHealth {
+	if t.healthChecker == nil {
+		return nil
+	}
+	return t.healthChecker.GetAllHealth()
+}
+
+// IsDCAvailable проверяет, доступен ли DC по результатам health check.
+// Возвращает true если health check отключен (assume available).
+func (t *Telegram) IsDCAvailable(dc int) bool {
+	if t.healthChecker == nil {
+		return true
+	}
+	return t.healthChecker.IsAvailable(dc)
+}
+
+// GetBestDC возвращает DC с наименьшей latency.
+// Возвращает 0 если health check отключен или нет доступных DC.
+func (t *Telegram) GetBestDC() int {
+	if t.healthChecker == nil {
+		return 0
+	}
+	return t.healthChecker.GetBestDC()
+}
+
+// TelegramOption — опция для конфигурации Telegram.
+type TelegramOption func(*Telegram)
+
+// WithConnectionPool включает connection pooling.
+func WithConnectionPool(config PoolConfig) TelegramOption {
+	return func(t *Telegram) {
+		t.connPool = NewConnectionPoolManager(t.dialer, config)
+		t.useConnPool = true
+	}
+}
+
+// WithoutConnectionPool отключает connection pooling (по умолчанию).
+func WithoutConnectionPool() TelegramOption {
+	return func(t *Telegram) {
+		t.useConnPool = false
+		t.connPool = nil
+	}
+}
+
+// WithHealthCheck включает периодическую проверку DC.
+// checkTimeout - таймаут для одной проверки, interval - интервал между проверками.
+func WithHealthCheck(checkTimeout, interval time.Duration) TelegramOption {
+	return func(t *Telegram) {
+		t.healthChecker = NewDCHealthChecker(&t.pool, checkTimeout)
+		t.healthChecker.Start(interval)
+	}
+}
+
+func New(dialer Dialer, ipPreference string, useTestDCs bool, opts ...TelegramOption) (*Telegram, error) {
 	var pref preferIP
 
 	switch strings.ToLower(ipPreference) {
@@ -75,9 +195,17 @@ func New(dialer Dialer, ipPreference string, useTestDCs bool) (*Telegram, error)
 		pool.v6 = testV6Addresses
 	}
 
-	return &Telegram{
-		dialer:   dialer,
-		preferIP: pref,
-		pool:     pool,
-	}, nil
+	tg := &Telegram{
+		dialer:      dialer,
+		preferIP:    pref,
+		pool:        pool,
+		useConnPool: false, // По умолчанию выключен
+	}
+
+	// Применяем опции
+	for _, opt := range opts {
+		opt(tg)
+	}
+
+	return tg, nil
 }

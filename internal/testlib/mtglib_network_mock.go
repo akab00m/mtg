@@ -29,3 +29,16 @@ func (m *MtglibNetworkMock) MakeHTTPClient(dialFunc func(ctx context.Context,
 ) *http.Client {
 	return m.Called(dialFunc).Get(0).(*http.Client) //nolint: forcetypeassert
 }
+
+func (m *MtglibNetworkMock) GetDNSCacheMetrics() (uint64, uint64, uint64, int) {
+	args := m.Called()
+	return args.Get(0).(uint64), args.Get(1).(uint64), args.Get(2).(uint64), args.Int(3) //nolint: forcetypeassert
+}
+
+func (m *MtglibNetworkMock) WarmUp(hostnames []string) {
+	m.Called(hostnames)
+}
+
+func (m *MtglibNetworkMock) Stop() {
+	m.Called()
+}

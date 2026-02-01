@@ -17,6 +17,24 @@ func (a addressPool) getRandomDC() int {
 	return 1 + rand.Intn(len(a.v4))
 }
 
+// getRandomDCExcluding returns a random DC excluding the specified one.
+// Used for fallback when primary DC is unavailable.
+func (a addressPool) getRandomDCExcluding(exclude int) int {
+	n := len(a.v4)
+	if n <= 1 {
+		// Only one DC available, return it even if it's the excluded one
+		return a.getRandomDC()
+	}
+
+	// Pick random from n-1 options, then adjust if we hit the excluded one
+	dc := 1 + rand.Intn(n-1)
+	if dc >= exclude {
+		dc++
+	}
+
+	return dc
+}
+
 func (a addressPool) getV4(dc int) []tgAddr {
 	return a.get(a.v4, dc-1)
 }

@@ -26,6 +26,7 @@ type Proxy struct {
 	streamWaitGroup sync.WaitGroup
 
 	allowFallbackOnUnknownDC bool
+	fallbackOnDialError      bool
 	tolerateTimeSkewness     time.Duration
 	domainFrontingPort       int
 	workerPool               *ants.PoolWithFunc
@@ -175,6 +176,9 @@ func (p *Proxy) Shutdown() {
 
 	p.allowlist.Shutdown()
 	p.blocklist.Shutdown()
+
+	// Закрытие connection pool к Telegram DC
+	p.telegram.Close()
 }
 
 func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
@@ -248,6 +252,7 @@ func (p *Proxy) doObfuscated2Handshake(ctx *streamContext) error {
 
 func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	dc := ctx.dc
+	originalDC := dc
 
 	// Telegram официально поддерживает только DC 1-5
 	// Отклонять запросы к несуществующим DC (203, 999 и т.д.) без логирования
@@ -264,7 +269,21 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 
 	conn, err := p.telegram.Dial(ctx, dc)
 	if err != nil {
-		return fmt.Errorf("cannot dial to Telegram: %w", err)
+		// Fallback to another DC on dial error
+		if p.fallbackOnDialError {
+			fallbackDC := p.telegram.GetFallbackDCExcluding(dc)
+			ctx.logger = ctx.logger.BindInt("original_dc", originalDC).BindInt("fallback_dc", fallbackDC)
+			ctx.logger.Warning("DC unavailable, trying fallback")
+
+			conn, err = p.telegram.Dial(ctx, fallbackDC)
+			if err != nil {
+				return fmt.Errorf("cannot dial to Telegram (fallback DC %d also failed): %w", fallbackDC, err)
+			}
+
+			dc = fallbackDC
+		} else {
+			return fmt.Errorf("cannot dial to Telegram: %w", err)
+		}
 	}
 
 	encryptor, decryptor, err := obfuscated2.ServerHandshake(conn)
@@ -288,7 +307,7 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	p.eventStream.Send(ctx,
 		NewEventConnectedToDC(ctx.streamID,
 			conn.RemoteAddr().(*net.TCPAddr).IP, //nolint: forcetypeassert
-			ctx.dc),
+			dc),
 	)
 
 	return nil
@@ -326,9 +345,34 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		return nil, fmt.Errorf("invalid settings: %w", err)
 	}
 
-	tg, err := telegram.New(opts.Network, opts.getPreferIP(), opts.UseTestDCs)
+	// Подготовка опций для telegram dialer
+	var tgOpts []telegram.TelegramOption
+	if opts.EnableConnectionPool {
+		poolConfig := telegram.PoolConfig{
+			MaxIdleConns:        opts.getConnectionPoolMaxIdle(),
+			IdleTimeout:         opts.getConnectionPoolIdleTimeout(),
+			HealthCheckInterval: 30 * time.Second,
+		}
+		tgOpts = append(tgOpts, telegram.WithConnectionPool(poolConfig))
+	}
+
+	// DC health check
+	if opts.EnableDCHealthCheck {
+		tgOpts = append(tgOpts, telegram.WithHealthCheck(
+			opts.getDCHealthCheckTimeout(),
+			opts.getDCHealthCheckInterval(),
+		))
+	}
+
+	tg, err := telegram.New(opts.Network, opts.getPreferIP(), opts.UseTestDCs, tgOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build telegram dialer: %w", err)
+	}
+
+	// DNS pre-warming: resolve FakeTLS domain before accepting connections.
+	// This reduces latency for the first client by 50-100ms.
+	if opts.Secret.Host != "" {
+		opts.Network.WarmUp([]string{opts.Secret.Host})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -359,6 +403,7 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		domainFrontingPort:       opts.getDomainFrontingPort(),
 		tolerateTimeSkewness:     opts.getTolerateTimeSkewness(),
 		allowFallbackOnUnknownDC: opts.AllowFallbackOnUnknownDC,
+		fallbackOnDialError:      opts.getFallbackOnDialError(),
 		telegram:                 tg,
 		config:                   config,
 		rateLimiter:              rateLimiter,

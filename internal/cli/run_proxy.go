@@ -43,14 +43,16 @@ func makeNetwork(conf *config.Config, version string) (mtglib.Network, error) {
 	httpTimeout := conf.Network.Timeout.HTTP.Get(network.DefaultHTTPTimeout)
 	dohIP := conf.Network.DOHIP.Get(net.ParseIP(network.DefaultDOHHostname)).String()
 	userAgent := "mtg/" + version
+	usePlainDNS := conf.Network.DNSMode.Get(config.DNSModeDoH) == config.DNSModePlain
+	enableTFO := conf.Network.TCPFastOpen.Get(false)
 
-	baseDialer, err := network.NewDefaultDialer(tcpTimeout, 0)
+	baseDialer, err := network.NewDefaultDialerWithTFO(tcpTimeout, 0, enableTFO)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build a default dialer: %w", err)
 	}
 
 	if len(conf.Network.Proxies) == 0 {
-		return network.NewNetwork(baseDialer, userAgent, dohIP, httpTimeout) //nolint: wrapcheck
+		return network.NewNetworkWithDNSMode(baseDialer, userAgent, dohIP, httpTimeout, usePlainDNS) //nolint: wrapcheck
 	}
 
 	proxyURLs := make([]*url.URL, 0, len(conf.Network.Proxies))
@@ -67,7 +69,7 @@ func makeNetwork(conf *config.Config, version string) (mtglib.Network, error) {
 			return nil, fmt.Errorf("cannot build socks5 dialer: %w", err)
 		}
 
-		return network.NewNetwork(socksDialer, userAgent, dohIP, httpTimeout) //nolint: wrapcheck
+		return network.NewNetworkWithDNSMode(socksDialer, userAgent, dohIP, httpTimeout, usePlainDNS) //nolint: wrapcheck
 	}
 
 	socksDialer, err := network.NewLoadBalancedSocks5Dialer(baseDialer, proxyURLs)
@@ -75,7 +77,7 @@ func makeNetwork(conf *config.Config, version string) (mtglib.Network, error) {
 		return nil, fmt.Errorf("cannot build socks5 dialer: %w", err)
 	}
 
-	return network.NewNetwork(socksDialer, userAgent, dohIP, httpTimeout) //nolint: wrapcheck
+	return network.NewNetworkWithDNSMode(socksDialer, userAgent, dohIP, httpTimeout, usePlainDNS) //nolint: wrapcheck
 }
 
 func makeAntiReplayCache(conf *config.Config) mtglib.AntiReplayCache {
@@ -164,7 +166,7 @@ func makeIPAllowlist(conf config.ListConfig,
 	return allowlist, nil
 }
 
-func makeEventStream(conf *config.Config, logger mtglib.Logger) (mtglib.EventStream, error) {
+func makeEventStream(conf *config.Config, logger mtglib.Logger, version string) (mtglib.EventStream, error) {
 	factories := make([]events.ObserverFactory, 0, 2) //nolint: gomnd
 
 	if conf.Stats.StatsD.Enabled.Get(false) {
@@ -184,6 +186,7 @@ func makeEventStream(conf *config.Config, logger mtglib.Logger) (mtglib.EventStr
 		prometheus := stats.NewPrometheus(
 			conf.Stats.Prometheus.MetricPrefix.Get(stats.DefaultMetricPrefix),
 			conf.Stats.Prometheus.HTTPPath.Get("/"),
+			version,
 		)
 
 		listener, err := net.Listen("tcp", conf.Stats.Prometheus.BindTo.Get(""))
@@ -208,7 +211,7 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 
 	logger.BindJSON("configuration", conf.String()).Debug("configuration")
 
-	eventStream, err := makeEventStream(conf, logger)
+	eventStream, err := makeEventStream(conf, logger, version)
 	if err != nil {
 		return fmt.Errorf("cannot build event stream: %w", err)
 	}
@@ -254,7 +257,18 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		PreferIP:           conf.PreferIP.Get(mtglib.DefaultPreferIP),
 
 		AllowFallbackOnUnknownDC: conf.AllowFallbackOnUnknownDC.Get(false),
+		FallbackOnDialError:      conf.FallbackOnDialError.Get(true), // default: true for reliability
 		TolerateTimeSkewness:     conf.TolerateTimeSkewness.Value,
+
+		// Connection Pool settings
+		EnableConnectionPool:      conf.ConnectionPool.Enabled.Get(false),
+		ConnectionPoolMaxIdle:     int(conf.ConnectionPool.MaxIdleConns.Get(5)),
+		ConnectionPoolIdleTimeout: conf.ConnectionPool.IdleTimeout.Value,
+
+		// DC Health Check settings
+		EnableDCHealthCheck:   conf.DCHealthCheck.Enabled.Get(false),
+		DCHealthCheckTimeout:  conf.DCHealthCheck.CheckTimeout.Value,
+		DCHealthCheckInterval: conf.DCHealthCheck.CheckInterval.Value,
 	}
 
 	proxy, err := mtglib.NewProxy(opts)
@@ -262,9 +276,18 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		return fmt.Errorf("cannot create a proxy: %w", err)
 	}
 
-	listener, err := utils.NewListener(conf.BindTo.Get(""), 0)
+	// Создаём listener с опциональной поддержкой TCP Fast Open
+	enableTFO := conf.Network.TCPFastOpen.Get(false)
+	listener, err := utils.NewListenerWithTFO(conf.BindTo.Get(""), 0, enableTFO)
 	if err != nil {
 		return fmt.Errorf("cannot start proxy: %w", err)
+	}
+
+	// Логируем статус TFO
+	if tfoListener, ok := listener.(utils.Listener); ok && tfoListener.IsTFOEnabled() {
+		logger.Info("TCP Fast Open enabled on listener")
+	} else if enableTFO {
+		logger.Warning("TCP Fast Open requested but not available (check net.ipv4.tcp_fastopen)")
 	}
 
 	ctx := utils.RootContext()

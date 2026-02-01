@@ -214,3 +214,35 @@ func newDNSResolver(hostname string, httpClient *http.Client) *dnsResolver {
 
 	return resolver
 }
+
+// Stop gracefully stops the DNS resolver and releases resources.
+// Should be called when shutting down to prevent goroutine leaks.
+func (d *dnsResolver) Stop() {
+	if d.cleanupStop != nil {
+		close(d.cleanupStop)
+		d.cleanupStop = nil
+	}
+}
+
+// WarmUp pre-resolves a list of hostnames to populate the DNS cache.
+// This reduces latency for the first connection to each host.
+// Lookups are performed in parallel for efficiency.
+func (d *dnsResolver) WarmUp(hostnames []string) {
+	if len(hostnames) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(hostnames))
+
+	for _, hostname := range hostnames {
+		go func(h string) {
+			defer wg.Done()
+			// LookupBoth performs parallel A and AAAA lookups
+			// and caches the results
+			d.LookupBoth(h)
+		}(hostname)
+	}
+
+	wg.Wait()
+}

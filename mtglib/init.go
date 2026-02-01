@@ -128,6 +128,15 @@ type Network interface {
 	// GetDNSCacheMetrics returns DNS cache statistics for monitoring.
 	// Returns: hits, misses, evictions (uint64), size (int)
 	GetDNSCacheMetrics() (uint64, uint64, uint64, int)
+
+	// WarmUp pre-resolves a list of hostnames to populate the DNS cache.
+	// This reduces latency for the first connection to each host.
+	// Pass FakeTLS domain and any other frequently accessed hostnames.
+	WarmUp(hostnames []string)
+
+	// Stop gracefully stops the network and releases resources.
+	// Should be called when shutting down to prevent goroutine leaks.
+	Stop()
 }
 
 // AntiReplayCache is an interface that is used to detect replay attacks based

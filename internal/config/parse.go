@@ -11,6 +11,7 @@ import (
 type tomlConfig struct {
 	Debug                    bool   `toml:"debug" json:"debug,omitempty"`
 	AllowFallbackOnUnknownDC bool   `toml:"allow-fallback-on-unknown-dc" json:"allowFallbackOnUnknownDc,omitempty"`
+	FallbackOnDialError      *bool  `toml:"fallback-on-dial-error" json:"fallbackOnDialError,omitempty"`
 	Secret                   string `toml:"secret" json:"secret"`
 	BindTo                   string `toml:"bind-to" json:"bindTo"`
 	PreferIP                 string `toml:"prefer-ip" json:"preferIp,omitempty"`
@@ -42,9 +43,21 @@ type tomlConfig struct {
 			HTTP string `toml:"http" json:"http,omitempty"`
 			Idle string `toml:"idle" json:"idle,omitempty"`
 		} `toml:"timeout" json:"timeout,omitempty"`
-		DOHIP   string   `toml:"doh-ip" json:"dohIp,omitempty"`
-		Proxies []string `toml:"proxies" json:"proxies,omitempty"`
+		DOHIP       string   `toml:"doh-ip" json:"dohIp,omitempty"`
+		DNSMode     string   `toml:"dns-mode" json:"dnsMode,omitempty"`
+		Proxies     []string `toml:"proxies" json:"proxies,omitempty"`
+		TCPFastOpen bool     `toml:"tcp-fast-open" json:"tcpFastOpen,omitempty"`
 	} `toml:"network" json:"network,omitempty"`
+	ConnectionPool struct {
+		Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`
+		MaxIdleConns uint   `toml:"max-idle-conns" json:"maxIdleConns,omitempty"`
+		IdleTimeout  string `toml:"idle-timeout" json:"idleTimeout,omitempty"`
+	} `toml:"connection-pool" json:"connectionPool,omitempty"`
+	DCHealthCheck struct {
+		Enabled       bool   `toml:"enabled" json:"enabled,omitempty"`
+		CheckTimeout  string `toml:"check-timeout" json:"checkTimeout,omitempty"`
+		CheckInterval string `toml:"check-interval" json:"checkInterval,omitempty"`
+	} `toml:"dc-health-check" json:"dcHealthCheck,omitempty"`
 	Stats struct {
 		StatsD struct {
 			Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`

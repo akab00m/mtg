@@ -24,11 +24,21 @@ func (n networkHTTPTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return n.next.RoundTrip(req) //nolint: wrapcheck
 }
 
+// dnsResolverInterface defines the interface for DNS resolvers
+type dnsResolverInterface interface {
+	LookupA(hostname string) []string
+	LookupAAAA(hostname string) []string
+	LookupBoth(hostname string) []string
+	GetCacheMetrics() DNSCacheMetrics
+	Stop()
+	WarmUp(hostnames []string)
+}
+
 type network struct {
 	dialer      Dialer
 	httpTimeout time.Duration
 	userAgent   string
-	dns         *dnsResolver
+	dns         dnsResolverInterface
 }
 
 func (n *network) Dial(protocol, address string) (essentials.Conn, error) {
@@ -134,13 +144,35 @@ func (n *network) GetDNSCacheMetrics() (uint64, uint64, uint64, int) {
 	return metrics.Hits, metrics.Misses, metrics.Evictions, metrics.Size
 }
 
+// WarmUp pre-resolves a list of hostnames to populate the DNS cache.
+// This reduces latency for the first connection to each host.
+func (n *network) WarmUp(hostnames []string) {
+	n.dns.WarmUp(hostnames)
+}
+
+// Stop gracefully stops the network and releases resources.
+func (n *network) Stop() {
+	n.dns.Stop()
+}
+
 // NewNetwork assembles an mtglib.Network compatible structure based on a
-// dialer and given params.
+// dialer and given params. Uses DNS-over-HTTPS by default.
 //
 // It brings simple DNS cache and DNS-Over-HTTPS when necessary.
 func NewNetwork(dialer Dialer,
 	userAgent, dohHostname string,
 	httpTimeout time.Duration,
+) (mtglib.Network, error) {
+	return NewNetworkWithDNSMode(dialer, userAgent, dohHostname, httpTimeout, false)
+}
+
+// NewNetworkWithDNSMode assembles an mtglib.Network with configurable DNS mode.
+// If usePlainDNS is true, uses system DNS resolver (faster but less private).
+// If usePlainDNS is false, uses DNS-over-HTTPS (more secure).
+func NewNetworkWithDNSMode(dialer Dialer,
+	userAgent, dohHostname string,
+	httpTimeout time.Duration,
+	usePlainDNS bool,
 ) (mtglib.Network, error) {
 	switch {
 	case httpTimeout < 0:
@@ -149,16 +181,23 @@ func NewNetwork(dialer Dialer,
 		httpTimeout = DefaultHTTPTimeout
 	}
 
-	if net.ParseIP(dohHostname) == nil {
-		return nil, fmt.Errorf("hostname %s should be IP address", dohHostname)
+	var dns dnsResolverInterface
+
+	if usePlainDNS {
+		dns = newPlainDNSResolver()
+	} else {
+		if net.ParseIP(dohHostname) == nil {
+			return nil, fmt.Errorf("hostname %s should be IP address", dohHostname)
+		}
+		dns = newDNSResolver(dohHostname,
+			makeHTTPClient(userAgent, DNSTimeout, dialer.DialContext))
 	}
 
 	return &network{
 		dialer:      dialer,
 		httpTimeout: httpTimeout,
 		userAgent:   userAgent,
-		dns: newDNSResolver(dohHostname,
-			makeHTTPClient(userAgent, DNSTimeout, dialer.DialContext)),
+		dns:         dns,
 	}, nil
 }
 

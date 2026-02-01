@@ -71,6 +71,11 @@ tolerate-time-skewness = "5s"
 # Otherwise, chose a new DC.
 allow-fallback-on-unknown-dc = false
 
+# If the requested DC is unavailable (connection error), try another DC.
+# This improves reliability when a specific DC is temporarily down.
+# Default: true
+fallback-on-dial-error = true
+
 # network defines different network-related settings
 [network]
 # please be aware that mtg needs to do some external requests. For
@@ -86,6 +91,33 @@ allow-fallback-on-unknown-dc = false
 #
 # By default we use Quad9.
 doh-ip = "9.9.9.9"
+
+# DNS resolution mode. Determines how mtg resolves domain names.
+# Options:
+#   - "doh" (default): DNS-over-HTTPS. More secure and private,
+#     but adds 20-70ms latency per DNS query. Recommended for
+#     environments where DNS traffic might be monitored.
+#   - "plain": System DNS resolver. Faster (~20-70ms less latency),
+#     but DNS queries are visible to network observers.
+#
+# If you're in a trusted network or need minimal latency, use "plain".
+# If privacy is important, keep the default "doh".
+dns-mode = "doh"
+
+# TCP Fast Open (TFO) reduces connection latency by 1×RTT (~50-100ms)
+# by sending data in the SYN packet.
+#
+# Requirements:
+#   - Linux kernel 3.7+ with net.ipv4.tcp_fastopen >= 3
+#   - Check: cat /proc/sys/net/ipv4/tcp_fastopen
+#   - Enable: sysctl -w net.ipv4.tcp_fastopen=3
+#
+# TFO is applied to:
+#   - Incoming connections (listener)
+#   - Outgoing connections to Telegram DC
+#
+# Safe to enable: will silently fallback to normal TCP if not supported.
+tcp-fast-open = false
 
 # mtg can work via proxies (for now, we support only socks5). Proxy
 # configuration is done via list. So, you can specify many proxies
@@ -196,6 +228,35 @@ urls = [
 
 ]
 update-each = "24h"
+
+# Connection pool for Telegram DC connections.
+# Reuses TCP connections to Telegram servers, reducing latency by 30-50ms
+# per request after the first one.
+#
+# This is safe optimization that doesn't affect traffic patterns or detection.
+[connection-pool]
+# You can enable/disable this feature.
+# Disabled by default for backward compatibility.
+enabled = false
+# Maximum number of idle connections per DC.
+# Each DC (1-5) will have its own pool.
+max-idle-conns = 5
+# Timeout for idle connections in the pool.
+# Connections idle longer than this will be closed.
+idle-timeout = "1m"
+
+# DC Health Check - периодическая проверка доступности DC.
+# Позволяет отслеживать состояние всех Telegram датацентров.
+# Полезно для мониторинга и диагностики проблем с подключением.
+[dc-health-check]
+# You can enable/disable this feature.
+# Disabled by default.
+enabled = false
+# Timeout for single DC check (TCP connect).
+check-timeout = "5s"
+# Interval between health checks.
+# All 5 DCs are checked in parallel.
+check-interval = "30s"
 
 # statsd statistics integration.
 [stats.statsd]

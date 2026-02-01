@@ -7,3 +7,4 @@ mtg
 .golangci.toml
 .gitignore
 run.sh
+project_status.md

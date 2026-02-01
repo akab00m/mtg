@@ -23,6 +23,7 @@ type ListConfig struct {
 type Config struct {
 	Debug                    TypeBool        `json:"debug"`
 	AllowFallbackOnUnknownDC TypeBool        `json:"allowFallbackOnUnknownDc"`
+	FallbackOnDialError      TypeBool        `json:"fallbackOnDialError"`
 	Secret                   mtglib.Secret   `json:"secret"`
 	BindTo                   TypeHostPort    `json:"bindTo"`
 	PreferIP                 TypePreferIP    `json:"preferIp"`
@@ -46,8 +47,40 @@ type Config struct {
 			Idle TypeDuration `json:"idle"`
 		} `json:"timeout"`
 		DOHIP   TypeIP         `json:"dohIp"`
+		DNSMode TypeDNSMode    `json:"dnsMode"`
 		Proxies []TypeProxyURL `json:"proxies"`
+		// TCPFastOpen включает TCP Fast Open на listener и исходящих соединениях.
+		// TFO экономит 1×RTT на первом соединении (~50-100ms).
+		// Требует поддержки ядром (net.ipv4.tcp_fastopen >= 3).
+		// Default: false (для обратной совместимости)
+		TCPFastOpen TypeBool `json:"tcpFastOpen"`
 	} `json:"network"`
+	// ConnectionPool — настройки пула соединений к Telegram DC.
+	// Переиспользование соединений снижает latency на 30-50ms.
+	ConnectionPool struct {
+		Optional
+
+		// MaxIdleConns — максимальное количество idle соединений на DC.
+		// Default: 5
+		MaxIdleConns TypeConcurrency `json:"maxIdleConns"`
+
+		// IdleTimeout — таймаут простоя для соединений в пуле.
+		// Default: 1m
+		IdleTimeout TypeDuration `json:"idleTimeout"`
+	} `json:"connectionPool"`
+	// DCHealthCheck — настройки проверки доступности DC.
+	// Периодически проверяет TCP-доступность всех DC.
+	DCHealthCheck struct {
+		Optional
+
+		// CheckTimeout — таймаут одной проверки DC.
+		// Default: 5s
+		CheckTimeout TypeDuration `json:"checkTimeout"`
+
+		// CheckInterval — интервал между проверками.
+		// Default: 30s
+		CheckInterval TypeDuration `json:"checkInterval"`
+	} `json:"dcHealthCheck"`
 	Stats struct {
 		StatsD struct {
 			Optional
