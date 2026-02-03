@@ -59,6 +59,9 @@ type Observer interface {
 	// EventDNSCacheMetrics reacts on incoming mtglib.EventDNSCacheMetrics event.
 	EventDNSCacheMetrics(mtglib.EventDNSCacheMetrics)
 
+	// EventPoolMetrics reacts on incoming mtglib.EventPoolMetrics event.
+	EventPoolMetrics(mtglib.EventPoolMetrics)
+
 	// Shutdown stop observer. Default event stream guarantees:
 	//   1. If shutdown is executed, it is executed only once
 	//   2. Observer won't receieve any new message after this

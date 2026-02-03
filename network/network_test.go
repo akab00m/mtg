@@ -51,6 +51,10 @@ func (suite *NetworkTestSuite) TestLocalHTTPRequest() {
 }
 
 func (suite *NetworkTestSuite) TestRealHTTPRequest() {
+	if testing.Short() {
+		suite.T().Skip("skipping integration test in short mode")
+	}
+
 	ntw, err := network.NewNetwork(suite.dialer, "itsme", "1.1.1.1", 0)
 	suite.NoError(err)
 

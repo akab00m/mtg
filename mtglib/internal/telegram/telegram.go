@@ -4,18 +4,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/9seconds/mtg/v2/essentials"
 )
 
 type Telegram struct {
-	dialer        Dialer
-	preferIP      preferIP
-	pool          addressPool
-	connPool      *ConnectionPoolManager // Connection pool для переиспользования соединений
-	useConnPool   bool                   // Включен ли connection pooling
-	healthChecker *DCHealthChecker       // DC health monitoring
+	dialer      Dialer
+	preferIP    preferIP
+	pool        addressPool
+	connPool    *ConnectionPoolManager // Connection pool для переиспользования соединений
+	useConnPool bool                   // Включен ли connection pooling
 }
 
 // Dial создаёт или переиспользует соединение к DC.
@@ -95,11 +93,8 @@ func (t *Telegram) GetFallbackDCExcluding(exclude int) int {
 	return t.pool.getRandomDCExcluding(exclude)
 }
 
-// Close закрывает все пулы соединений и останавливает health checker.
+// Close закрывает все пулы соединений.
 func (t *Telegram) Close() error {
-	if t.healthChecker != nil {
-		t.healthChecker.Stop()
-	}
 	if t.connPool != nil {
 		return t.connPool.Close()
 	}
@@ -113,33 +108,6 @@ func (t *Telegram) PoolStats() []PoolStats {
 		return nil
 	}
 	return t.connPool.AllStats()
-}
-
-// DCHealthStatus возвращает статус здоровья всех DC.
-// Возвращает nil если health check отключен.
-func (t *Telegram) DCHealthStatus() []DCHealth {
-	if t.healthChecker == nil {
-		return nil
-	}
-	return t.healthChecker.GetAllHealth()
-}
-
-// IsDCAvailable проверяет, доступен ли DC по результатам health check.
-// Возвращает true если health check отключен (assume available).
-func (t *Telegram) IsDCAvailable(dc int) bool {
-	if t.healthChecker == nil {
-		return true
-	}
-	return t.healthChecker.IsAvailable(dc)
-}
-
-// GetBestDC возвращает DC с наименьшей latency.
-// Возвращает 0 если health check отключен или нет доступных DC.
-func (t *Telegram) GetBestDC() int {
-	if t.healthChecker == nil {
-		return 0
-	}
-	return t.healthChecker.GetBestDC()
 }
 
 // TelegramOption — опция для конфигурации Telegram.
@@ -158,15 +126,6 @@ func WithoutConnectionPool() TelegramOption {
 	return func(t *Telegram) {
 		t.useConnPool = false
 		t.connPool = nil
-	}
-}
-
-// WithHealthCheck включает периодическую проверку DC.
-// checkTimeout - таймаут для одной проверки, interval - интервал между проверками.
-func WithHealthCheck(checkTimeout, interval time.Duration) TelegramOption {
-	return func(t *Telegram) {
-		t.healthChecker = NewDCHealthChecker(&t.pool, checkTimeout)
-		t.healthChecker.Start(interval)
 	}
 }
 

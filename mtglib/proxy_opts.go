@@ -155,22 +155,6 @@ type ProxyOpts struct {
 	//
 	// This is an optional setting. Default: 1 minute
 	ConnectionPoolIdleTimeout time.Duration
-
-	// EnableDCHealthCheck включает периодическую проверку доступности DC.
-	// Позволяет отслеживать состояние всех Telegram DC.
-	//
-	// This is an optional setting. Default: false
-	EnableDCHealthCheck bool
-
-	// DCHealthCheckTimeout — таймаут одной проверки DC.
-	//
-	// This is an optional setting. Default: 5 seconds
-	DCHealthCheckTimeout time.Duration
-
-	// DCHealthCheckInterval — интервал между проверками DC.
-	//
-	// This is an optional setting. Default: 30 seconds
-	DCHealthCheckInterval time.Duration
 }
 
 func (p ProxyOpts) valid() error {
@@ -264,7 +248,10 @@ func (p ProxyOpts) getConnectionPoolMaxIdle() int {
 
 func (p ProxyOpts) getConnectionPoolIdleTimeout() time.Duration {
 	if p.ConnectionPoolIdleTimeout == 0 {
-		return time.Minute // default
+		// По умолчанию 20 секунд — меньше, чем idle timeout Telegram (30-60 сек).
+		// Это гарантирует, что соединения будут закрыты ДО того, как Telegram
+		// их закроет, избегая ошибок "connection reset by peer".
+		return 20 * time.Second
 	}
 
 	return p.ConnectionPoolIdleTimeout
@@ -273,20 +260,4 @@ func (p ProxyOpts) getConnectionPoolIdleTimeout() time.Duration {
 func (p ProxyOpts) getFallbackOnDialError() bool {
 	// Default: true - fallback улучшает reliability
 	return p.FallbackOnDialError
-}
-
-func (p ProxyOpts) getDCHealthCheckTimeout() time.Duration {
-	if p.DCHealthCheckTimeout == 0 {
-		return 5 * time.Second // default
-	}
-
-	return p.DCHealthCheckTimeout
-}
-
-func (p ProxyOpts) getDCHealthCheckInterval() time.Duration {
-	if p.DCHealthCheckInterval == 0 {
-		return 30 * time.Second // default
-	}
-
-	return p.DCHealthCheckInterval
 }

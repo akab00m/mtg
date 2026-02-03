@@ -142,6 +142,14 @@ func (s statsdProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
 	s.client.Incr(MetricDNSCacheEvictions, int64(evt.DeltaEvictions))
 }
 
+func (s statsdProcessor) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
+	dcTag := statsd.StringTag(TagDC, strconv.Itoa(evt.DC))
+	s.client.Gauge("connection_pool_idle", int64(evt.Idle), dcTag)
+	s.client.Incr("connection_pool_hits", int64(evt.DeltaHits), dcTag)
+	s.client.Incr("connection_pool_misses", int64(evt.DeltaMisses), dcTag)
+	s.client.Incr("connection_pool_unhealthy", int64(evt.DeltaUnhealthy), dcTag)
+}
+
 func (s statsdProcessor) Shutdown() {
 	events := make([]mtglib.EventFinish, 0, len(s.streams))
 

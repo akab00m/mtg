@@ -106,6 +106,8 @@ func eventStreamProcessor(ctx context.Context, eventChan <-chan mtglib.Event, ob
 				observer.EventIPListSize(typedEvt)
 			case mtglib.EventDNSCacheMetrics:
 				observer.EventDNSCacheMetrics(typedEvt)
+			case mtglib.EventPoolMetrics:
+				observer.EventPoolMetrics(typedEvt)
 			}
 		}
 	}

@@ -16,6 +16,13 @@ const (
 	dirDownload                  // telegram -> client (приоритетное)
 )
 
+// Глобальный адаптивный буфер для управления размером буферов
+// Безопасно для concurrent использования
+var globalAdaptiveBuffer = NewAdaptiveBuffer(
+	64*1024,  // Min: 64KB
+	512*1024, // Max: 512KB
+)
+
 func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.Conn) {
 	defer telegramConn.Close()
 	defer clientConn.Close()
@@ -23,8 +30,13 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Graceful shutdown: при отмене контекста корректно закрываем соединения
+	// Это стандартный TCP behaviour (FIN/RST) — не создаёт fingerprint
 	go func() {
 		<-ctx.Done()
+		// Graceful close: сначала отключаем запись (FIN), потом закрываем
+		telegramConn.CloseWrite() //nolint: errcheck
+		clientConn.CloseWrite()   //nolint: errcheck
 		telegramConn.Close()
 		clientConn.Close()
 	}()
@@ -35,27 +47,38 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	setTCPNoDelay(telegramConn) // Upload: client -> telegram
 	setTCPNoDelay(clientConn)   // Download: telegram -> client
 
-	// Upload: client -> telegram (фоновый)
+	// Создаём статистику для адаптивного управления буферами
+	downloadStats := NewStreamStats()
+	uploadStats := NewStreamStats()
+
+	// Upload: client -> telegram (обычный приоритет)
 	go func() {
 		defer close(closeChan)
-		pump(log, telegramConn, clientConn, "client -> telegram", dirUpload)
+		pump(log, telegramConn, clientConn, "client -> telegram", dirUpload, uploadStats)
 	}()
 
-	// Download: telegram -> client (приоритетный)
+	// Download: telegram -> client (высокий приоритет)
 	// Для download настраиваем TCP для минимальной latency
 	setTCPQuickACK(clientConn) // Немедленные ACK
 
-	pump(log, clientConn, telegramConn, "telegram -> client", dirDownload)
+	pump(log, clientConn, telegramConn, "telegram -> client", dirDownload, downloadStats)
 
 	<-closeChan
 }
 
-func pump(log Logger, src, dst essentials.Conn, directionStr string, dir direction) {
+func pump(log Logger, src, dst essentials.Conn, directionStr string, dir direction, stats *StreamStats) {
 	defer src.CloseRead()  //nolint: errcheck
 	defer dst.CloseWrite() //nolint: errcheck
 
 	copyBuffer := acquireCopyBuffer()
 	defer releaseCopyBuffer(copyBuffer)
+
+	// Применяем приоритетные hints для download направления
+	// ВАЖНО: Это влияет только на внутренний scheduling, НЕ на wire-level pattern
+	if dir == dirDownload {
+		PriorityHints.ApplyHighPriority()
+		defer PriorityHints.ReleaseHighPriority()
+	}
 
 	// Оптимизации TCP для обоих направлений (много мелких пакетов)
 	// TCP_NODELAY уже установлен в Relay(), здесь дополнительные настройки
@@ -67,9 +90,9 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		setTCPQuickACK(src)
 		setTCPQuickACK(dst)
 
-		// TCP_NOTSENT_LOWAT - 4KB (баланс между responsiveness и throughput)
-		// Слишком низкое значение может снижать throughput
-		setTCPNotSentLowat(dst, 4096)
+		// TCP_NOTSENT_LOWAT - 16KB для лучшего throughput при download медиа
+		// Было 4KB - слишком агрессивно для больших файлов
+		setTCPNotSentLowat(dst, 16384)
 	} else {
 		// Upload: client -> telegram
 		// Также применяем QUICKACK для снижения latency в обоих направлениях
@@ -78,7 +101,8 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 	}
 
 	// Try zero-copy first (Linux splice), fallback to standard copy
-	n, err := copyWithZeroCopy(src, dst, *copyBuffer)
+	// Передаём статистику для адаптивного управления
+	n, err := copyWithZeroCopyAdaptive(src, dst, *copyBuffer, stats)
 
 	switch {
 	case err == nil:

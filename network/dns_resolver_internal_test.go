@@ -41,10 +41,15 @@ func (suite *DNSResolverTestSuite) TestLookupAAAA() {
 }
 
 func (suite *DNSResolverTestSuite) SetupTest() {
-	suite.d = newDNSResolver("1.1.1.1", &http.Client{})
+	suite.d = newDNSResolver("1.1.1.1", &http.Client{
+		Timeout: 5 * time.Second, // Таймаут для предотвращения зависания
+	})
 }
 
 func TestDNSResolver(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping DNS resolver test in short mode (requires network)")
+	}
 	t.Parallel()
 	suite.Run(t, &DNSResolverTestSuite{})
 }

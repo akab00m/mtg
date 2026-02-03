@@ -1,3 +1,5 @@
+//go:build integration
+
 package mtglib_test
 
 import (
@@ -168,6 +170,10 @@ func (suite *ProxyTestSuite) TestDomainFrontingAddress() {
 }
 
 func (suite *ProxyTestSuite) TestHTTPSRequest() {
+	if testing.Short() {
+		suite.T().Skip("skipping integration test in short mode")
+	}
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -200,6 +206,10 @@ func (suite *ProxyTestSuite) TestHTTPSRequest() {
 }
 
 func (suite *ProxyTestSuite) TestMakeRealRequest() {
+	if testing.Short() {
+		suite.T().Skip("skipping integration test in short mode")
+	}
+
 	secret, _ := hex.DecodeString(suite.opts.Secret.Hex())
 	resolver, err := dcs.MTProxy(
 		suite.ProxyAddress(),
@@ -226,6 +236,10 @@ func (suite *ProxyTestSuite) TestMakeRealRequest() {
 }
 
 func TestProxy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test suite in short mode")
+	}
+
 	t.Parallel()
 	suite.Run(t, &ProxyTestSuite{})
 }

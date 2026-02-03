@@ -264,11 +264,6 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		EnableConnectionPool:      conf.ConnectionPool.Enabled.Get(false),
 		ConnectionPoolMaxIdle:     int(conf.ConnectionPool.MaxIdleConns.Get(5)),
 		ConnectionPoolIdleTimeout: conf.ConnectionPool.IdleTimeout.Value,
-
-		// DC Health Check settings
-		EnableDCHealthCheck:   conf.DCHealthCheck.Enabled.Get(false),
-		DCHealthCheckTimeout:  conf.DCHealthCheck.CheckTimeout.Value,
-		DCHealthCheckInterval: conf.DCHealthCheck.CheckInterval.Value,
 	}
 
 	proxy, err := mtglib.NewProxy(opts)
@@ -321,6 +316,52 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 				}
 			}
 		}()
+
+		// Start connection pool metrics updater if pool is enabled
+		if conf.ConnectionPool.Enabled.Get(false) {
+			go func() {
+				ticker := time.NewTicker(10 * time.Second)
+				defer ticker.Stop()
+
+				// Track previous values for delta calculation
+				type dcStats struct {
+					hits, misses, unhealthy uint64
+				}
+				lastStats := make(map[int]dcStats)
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						poolStats := proxy.GetPoolStats()
+						if poolStats == nil {
+							continue
+						}
+
+						for _, ps := range poolStats {
+							last := lastStats[ps.DC]
+
+							// Calculate deltas
+							deltaHits := ps.Hits - last.hits
+							deltaMisses := ps.Misses - last.misses
+							deltaUnhealthy := ps.Unhealthy - last.unhealthy
+
+							// Send event
+							eventStream.Send(ctx, mtglib.NewEventPoolMetrics(
+								ps.DC, deltaHits, deltaMisses, deltaUnhealthy, ps.Idle))
+
+							// Update last values
+							lastStats[ps.DC] = dcStats{
+								hits:      ps.Hits,
+								misses:    ps.Misses,
+								unhealthy: ps.Unhealthy,
+							}
+						}
+					}
+				}
+			}()
+		}
 	}
 
 	go proxy.Serve(listener) //nolint: errcheck

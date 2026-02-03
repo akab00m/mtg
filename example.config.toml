@@ -233,7 +233,14 @@ update-each = "24h"
 # Reuses TCP connections to Telegram servers, reducing latency by 30-50ms
 # per request after the first one.
 #
-# This is safe optimization that doesn't affect traffic patterns or detection.
+# IMPORTANT: Telegram closes idle connections after ~30-60 seconds.
+# The pool is configured to handle this:
+#   1. idle-timeout is set to 20s (less than Telegram's timeout)
+#   2. Health checks detect closed connections before reuse
+#   3. TCP keepalive is enabled for faster dead connection detection
+#
+# Best practice: If you experience "connection reset by peer" errors,
+# try reducing idle-timeout to 15s or disabling the pool.
 [connection-pool]
 # You can enable/disable this feature.
 # Disabled by default for backward compatibility.
@@ -242,21 +249,9 @@ enabled = false
 # Each DC (1-5) will have its own pool.
 max-idle-conns = 5
 # Timeout for idle connections in the pool.
-# Connections idle longer than this will be closed.
-idle-timeout = "1m"
-
-# DC Health Check - периодическая проверка доступности DC.
-# Позволяет отслеживать состояние всех Telegram датацентров.
-# Полезно для мониторинга и диагностики проблем с подключением.
-[dc-health-check]
-# You can enable/disable this feature.
-# Disabled by default.
-enabled = false
-# Timeout for single DC check (TCP connect).
-check-timeout = "5s"
-# Interval between health checks.
-# All 5 DCs are checked in parallel.
-check-interval = "30s"
+# MUST be less than Telegram's idle timeout (~30-60s).
+# Default: 20s. Reduce to 15s if you still see reset errors.
+idle-timeout = "20s"
 
 # statsd statistics integration.
 [stats.statsd]

@@ -269,3 +269,43 @@ func TestDCPool_ConcurrentAccess(t *testing.T) {
 	stats := pool.Stats()
 	assert.True(t, stats.Hits+stats.Misses >= 100)
 }
+
+// TestDCPool_UnhealthyConnectionRejected проверяет, что соединения с истёкшим
+// idle timeout отклоняются при попытке взять из пула.
+// Примечание: проверка closed socket убрана, т.к. Telegram закрывает соединения
+// без RST, и TCP-level проверки ненадёжны. Вместо этого используется retry
+// при broken pipe на уровне handshake (см. proxy.go).
+func TestDCPool_UnhealthyConnectionRejected(t *testing.T) {
+	dialer := &mockDialer{}
+	addrs := []tgAddr{{network: "tcp4", address: "127.0.0.1:443"}}
+
+	// Очень короткий idle timeout для теста
+	config := PoolConfig{
+		MaxIdleConns: 3,
+		IdleTimeout:  10 * time.Millisecond,
+	}
+
+	pool := NewDCPool(1, dialer, addrs, config)
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	// Получаем соединение
+	conn1, err := pool.Get(ctx)
+	require.NoError(t, err)
+
+	// Возвращаем в пул
+	pool.Put(conn1)
+
+	// Ждём истечения idle timeout
+	time.Sleep(50 * time.Millisecond)
+
+	// Пробуем взять — должно создаться новое (старое отклонено как unhealthy)
+	conn2, err := pool.Get(ctx)
+	require.NoError(t, err)
+	defer conn2.Close()
+
+	stats := pool.Stats()
+	assert.Equal(t, uint64(1), stats.Unhealthy, "expired connection should be rejected as unhealthy")
+	assert.Equal(t, uint64(2), stats.Misses, "should create new connection after unhealthy rejection")
+}

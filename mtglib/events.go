@@ -240,3 +240,37 @@ func NewEventDNSCacheMetrics(deltaHits, deltaMisses, deltaEvictions uint64, size
 		Size:           size,
 	}
 }
+
+// EventPoolMetrics is emitted periodically to update connection pool statistics.
+type EventPoolMetrics struct {
+	eventBase
+
+	// DC is the datacenter number
+	DC int
+
+	// DeltaHits is the number of pool hits since last update
+	DeltaHits uint64
+
+	// DeltaMisses is the number of pool misses since last update
+	DeltaMisses uint64
+
+	// DeltaUnhealthy is the number of unhealthy connections rejected since last update
+	DeltaUnhealthy uint64
+
+	// Idle is the current number of idle connections
+	Idle int
+}
+
+// NewEventPoolMetrics creates a new EventPoolMetrics event.
+func NewEventPoolMetrics(dc int, deltaHits, deltaMisses, deltaUnhealthy uint64, idle int) EventPoolMetrics {
+	return EventPoolMetrics{
+		eventBase: eventBase{
+			timestamp: time.Now(),
+		},
+		DC:             dc,
+		DeltaHits:      deltaHits,
+		DeltaMisses:    deltaMisses,
+		DeltaUnhealthy: deltaUnhealthy,
+		Idle:           idle,
+	}
+}

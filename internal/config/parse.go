@@ -53,11 +53,6 @@ type tomlConfig struct {
 		MaxIdleConns uint   `toml:"max-idle-conns" json:"maxIdleConns,omitempty"`
 		IdleTimeout  string `toml:"idle-timeout" json:"idleTimeout,omitempty"`
 	} `toml:"connection-pool" json:"connectionPool,omitempty"`
-	DCHealthCheck struct {
-		Enabled       bool   `toml:"enabled" json:"enabled,omitempty"`
-		CheckTimeout  string `toml:"check-timeout" json:"checkTimeout,omitempty"`
-		CheckInterval string `toml:"check-interval" json:"checkInterval,omitempty"`
-	} `toml:"dc-health-check" json:"dcHealthCheck,omitempty"`
 	Stats struct {
 		StatsD struct {
 			Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`

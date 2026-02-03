@@ -160,6 +160,21 @@ func (m multiObserver) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
 	wg.Wait()
 }
 
+func (m multiObserver) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(m.observers))
+
+	for _, v := range m.observers {
+		go func(obs Observer) {
+			defer wg.Done()
+
+			obs.EventPoolMetrics(evt)
+		}(v)
+	}
+
+	wg.Wait()
+}
+
 func (m multiObserver) Shutdown() {
 	for _, v := range m.observers {
 		v.Shutdown()

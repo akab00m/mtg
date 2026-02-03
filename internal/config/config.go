@@ -68,19 +68,6 @@ type Config struct {
 		// Default: 1m
 		IdleTimeout TypeDuration `json:"idleTimeout"`
 	} `json:"connectionPool"`
-	// DCHealthCheck — настройки проверки доступности DC.
-	// Периодически проверяет TCP-доступность всех DC.
-	DCHealthCheck struct {
-		Optional
-
-		// CheckTimeout — таймаут одной проверки DC.
-		// Default: 5s
-		CheckTimeout TypeDuration `json:"checkTimeout"`
-
-		// CheckInterval — интервал между проверками.
-		// Default: 30s
-		CheckInterval TypeDuration `json:"checkInterval"`
-	} `json:"dcHealthCheck"`
 	Stats struct {
 		StatsD struct {
 			Optional

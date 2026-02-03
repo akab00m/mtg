@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/9seconds/mtg/v2/essentials"
@@ -18,6 +19,24 @@ import (
 	"github.com/9seconds/mtg/v2/mtglib/internal/telegram"
 	"github.com/panjf2000/ants/v2"
 )
+
+// isBrokenPipeError проверяет, является ли ошибка broken pipe или connection reset.
+// Это происходит когда соединение из pool было закрыто Telegram до использования.
+func isBrokenPipeError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Используем errors.Is для проверки syscall.Errno (Errno реализует Is() с Go 1.13)
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+
+	// Fallback для wrapped ошибок где errors.Is не срабатывает
+	errStr := err.Error()
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset by peer")
+}
 
 // Proxy is an MTPROTO proxy structure.
 type Proxy struct {
@@ -181,6 +200,12 @@ func (p *Proxy) Shutdown() {
 	p.telegram.Close()
 }
 
+// GetPoolStats returns connection pool statistics for all DCs.
+// Returns nil if connection pooling is disabled.
+func (p *Proxy) GetPoolStats() []telegram.PoolStats {
+	return p.telegram.PoolStats()
+}
+
 func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
 	rec := record.AcquireRecord()
 	defer record.ReleaseRecord(rec)
@@ -290,7 +315,24 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	if err != nil {
 		conn.Close()
 
-		return fmt.Errorf("cannot perform obfuscated2 handshake: %w", err)
+		// Retry с новым соединением при broken pipe (stale connection из pool)
+		if isBrokenPipeError(err) {
+			ctx.logger.Debug("broken pipe on handshake, retrying with fresh connection")
+
+			// Получаем новое соединение напрямую (минуя pool)
+			conn, err = p.telegram.DialDirect(ctx, dc)
+			if err != nil {
+				return fmt.Errorf("cannot dial to Telegram (retry): %w", err)
+			}
+
+			encryptor, decryptor, err = obfuscated2.ServerHandshake(conn)
+			if err != nil {
+				conn.Close()
+				return fmt.Errorf("cannot perform obfuscated2 handshake (retry): %w", err)
+			}
+		} else {
+			return fmt.Errorf("cannot perform obfuscated2 handshake: %w", err)
+		}
 	}
 
 	ctx.telegramConn = obfuscated2.Conn{
@@ -354,14 +396,6 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 			HealthCheckInterval: 30 * time.Second,
 		}
 		tgOpts = append(tgOpts, telegram.WithConnectionPool(poolConfig))
-	}
-
-	// DC health check
-	if opts.EnableDCHealthCheck {
-		tgOpts = append(tgOpts, telegram.WithHealthCheck(
-			opts.getDCHealthCheckTimeout(),
-			opts.getDCHealthCheckInterval(),
-		))
 	}
 
 	tg, err := telegram.New(opts.Network, opts.getPreferIP(), opts.UseTestDCs, tgOpts...)

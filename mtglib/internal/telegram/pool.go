@@ -13,10 +13,20 @@ import (
 
 // Конфигурация по умолчанию для connection pool.
 const (
-	DefaultPoolSize     = 5           // Размер пула на один DC
-	DefaultIdleTimeout  = time.Minute // Таймаут простоя соединения
-	DefaultHealthCheck  = 30 * time.Second
-	DefaultDialTimeout  = 10 * time.Second
+	DefaultPoolSize    = 5  // Размер пула на один DC
+	DefaultDialTimeout = 10 * time.Second
+	DefaultHealthCheck = 30 * time.Second
+
+	// DefaultIdleTimeout — агрессивный таймаут для избежания проблемы с Telegram.
+	// Telegram закрывает idle-соединения через ~30-60 секунд.
+	// Используем 20 секунд — достаточно консервативно, чтобы гарантировать
+	// что соединения будут закрыты ДО того, как их закроет Telegram.
+	// Это устраняет ошибки "connection reset by peer" при переиспользовании.
+	DefaultIdleTimeout = 20 * time.Second
+
+	// keepalivePeriod — интервал TCP keepalive для обнаружения мёртвых соединений.
+	// 10 секунд — достаточно агрессивно для fast failover.
+	keepalivePeriod = 10 * time.Second
 )
 
 var (
@@ -54,20 +64,22 @@ type pooledConn struct {
 	usageCount uint64
 }
 
+// maxConnectionAge — максимальный возраст соединения независимо от активности.
+// Telegram закрывает соединения через 30-60 сек, используем 30 сек.
+const maxConnectionAge = 30 * time.Second
+
 // isHealthy проверяет, можно ли использовать соединение.
+// Только проверка idle timeout — TCP-level проверки ненадёжны для MTProxy.
+// При broken pipe на handshake — соединение будет закрыто и создано новое.
 func (p *pooledConn) isHealthy(idleTimeout time.Duration) bool {
-	// Проверка таймаута простоя
+	// Строгая проверка idle timeout
+	// Telegram закрывает соединения через 30-60 сек
 	if time.Since(p.lastUsedAt) > idleTimeout {
 		return false
 	}
 
-	// Проверка TCP-состояния через SetReadDeadline trick
-	if err := p.SetReadDeadline(time.Now().Add(time.Microsecond)); err != nil {
-		return false
-	}
-
-	// Сброс deadline
-	if err := p.SetReadDeadline(time.Time{}); err != nil {
+	// Не переиспользуем если соединение старше maxConnectionAge
+	if time.Since(p.createdAt) > maxConnectionAge {
 		return false
 	}
 
@@ -129,7 +141,16 @@ func (p *DCPool) Get(ctx context.Context) (essentials.Conn, error) {
 
 	// Пробуем взять из пула
 	for {
+		// Проверяем context cancellation
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case conn := <-p.conns:
 			if conn.isHealthy(p.config.IdleTimeout) {
 				conn.markUsed()
@@ -187,6 +208,7 @@ func (p *DCPool) Put(conn essentials.Conn) {
 }
 
 // dial создаёт новое соединение к DC.
+// Устанавливает TCP keepalive для быстрого обнаружения мёртвых соединений.
 func (p *DCPool) dial(ctx context.Context) (essentials.Conn, error) {
 	p.mu.Lock()
 	addrs := make([]tgAddr, len(p.addrs))
@@ -199,6 +221,13 @@ func (p *DCPool) dial(ctx context.Context) (essentials.Conn, error) {
 		if err != nil {
 			lastErr = err
 			continue
+		}
+
+		// Настраиваем TCP keepalive для pooled-соединений.
+		// Это критично для обнаружения закрытых Telegram-ом соединений.
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.SetKeepAlive(true)
+			_ = tcpConn.SetKeepAlivePeriod(keepalivePeriod)
 		}
 
 		p.stats.created.Add(1)

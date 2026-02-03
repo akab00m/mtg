@@ -49,6 +49,10 @@ func (o *ObserverMock) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
 	o.Called(evt)
 }
 
+func (o *ObserverMock) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
+	o.Called(evt)
+}
+
 func (o *ObserverMock) Shutdown() {
 	o.Called()
 }

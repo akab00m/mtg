@@ -152,6 +152,10 @@ func (p prometheusProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetric
 	p.factory.UpdateDNSCacheMetrics(evt.DeltaHits, evt.DeltaMisses, evt.DeltaEvictions, evt.Size)
 }
 
+func (p prometheusProcessor) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
+	p.factory.UpdatePoolMetricsDelta(evt.DC, evt.DeltaHits, evt.DeltaMisses, evt.DeltaUnhealthy, evt.Idle)
+}
+
 func (p prometheusProcessor) Shutdown() {
 	for k, v := range p.streams {
 		releaseStreamInfo(v)
@@ -191,6 +195,12 @@ type PrometheusFactory struct {
 	metricSessionDuration prometheus.Histogram // Длительность сессий для расчёта throughput
 	metricTTFB            prometheus.Histogram // Time To First Byte для latency анализа
 
+	// Connection pool metrics (PHASE 3.3)
+	metricPoolHits      *prometheus.CounterVec // Успешные взятия из пула
+	metricPoolMisses    *prometheus.CounterVec // Промахи (создание нового)
+	metricPoolUnhealthy *prometheus.CounterVec // Отклонено нездоровых
+	metricPoolIdle      *prometheus.GaugeVec   // Текущее количество idle
+
 	// Build info metric
 	metricBuildInfo *prometheus.GaugeVec
 }
@@ -226,6 +236,33 @@ func (p *PrometheusFactory) UpdateDNSCacheMetrics(hits, misses, evictions uint64
 // IncrementRateLimitRejects increments the rate limit rejection counter.
 func (p *PrometheusFactory) IncrementRateLimitRejects() {
 	p.metricRateLimitRejects.Inc()
+}
+
+// UpdatePoolMetrics updates connection pool metrics for a specific DC.
+// Should be called periodically to keep metrics fresh.
+func (p *PrometheusFactory) UpdatePoolMetrics(dc int, hits, misses, unhealthy uint64, idle int) {
+	dcStr := strconv.Itoa(dc)
+	// Reset and set counters based on total values
+	// Note: Prometheus counters are monotonic, so we use Add with delta
+	p.metricPoolHits.WithLabelValues(dcStr).Add(0)    // Just touch to create label
+	p.metricPoolMisses.WithLabelValues(dcStr).Add(0)  // Just touch to create label
+	p.metricPoolUnhealthy.WithLabelValues(dcStr).Add(0)
+	p.metricPoolIdle.WithLabelValues(dcStr).Set(float64(idle))
+}
+
+// UpdatePoolMetricsDelta updates connection pool metrics with delta values.
+func (p *PrometheusFactory) UpdatePoolMetricsDelta(dc int, deltaHits, deltaMisses, deltaUnhealthy uint64, idle int) {
+	dcStr := strconv.Itoa(dc)
+	if deltaHits > 0 {
+		p.metricPoolHits.WithLabelValues(dcStr).Add(float64(deltaHits))
+	}
+	if deltaMisses > 0 {
+		p.metricPoolMisses.WithLabelValues(dcStr).Add(float64(deltaMisses))
+	}
+	if deltaUnhealthy > 0 {
+		p.metricPoolUnhealthy.WithLabelValues(dcStr).Add(float64(deltaUnhealthy))
+	}
+	p.metricPoolIdle.WithLabelValues(dcStr).Set(float64(idle))
 }
 
 // NewPrometheus builds an events.ObserverFactory which can serve HTTP
@@ -338,6 +375,28 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
 		}),
 
+		// Connection pool metrics (PHASE 3.3)
+		metricPoolHits: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "connection_pool_hits_total",
+			Help:      "Number of connections successfully retrieved from pool.",
+		}, []string{TagDC}),
+		metricPoolMisses: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "connection_pool_misses_total",
+			Help:      "Number of pool misses (new connections created).",
+		}, []string{TagDC}),
+		metricPoolUnhealthy: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      "connection_pool_unhealthy_total",
+			Help:      "Number of unhealthy connections rejected from pool.",
+		}, []string{TagDC}),
+		metricPoolIdle: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: metricPrefix,
+			Name:      "connection_pool_idle",
+			Help:      "Current number of idle connections in pool.",
+		}, []string{TagDC}),
+
 		// Build info metric
 		metricBuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: metricPrefix,
@@ -369,6 +428,12 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 	// Register mobile optimization metrics (PHASE 4)
 	registry.MustRegister(factory.metricSessionDuration)
 	registry.MustRegister(factory.metricTTFB)
+
+	// Register connection pool metrics (PHASE 3.3)
+	registry.MustRegister(factory.metricPoolHits)
+	registry.MustRegister(factory.metricPoolMisses)
+	registry.MustRegister(factory.metricPoolUnhealthy)
+	registry.MustRegister(factory.metricPoolIdle)
 
 	// Register build info metric and set version
 	registry.MustRegister(factory.metricBuildInfo)
