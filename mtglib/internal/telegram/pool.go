@@ -102,6 +102,7 @@ type DCPool struct {
 	conns  chan *pooledConn
 	mu     sync.Mutex
 	closed atomic.Bool
+	stopCh chan struct{} // сигнал остановки background cleanup
 
 	// Статистика
 	stats struct {
@@ -128,7 +129,12 @@ func NewDCPool(dc int, dialer Dialer, addrs []tgAddr, config PoolConfig) *DCPool
 		addrs:  addrs,
 		config: config,
 		conns:  make(chan *pooledConn, config.MaxIdleConns),
+		stopCh: make(chan struct{}),
 	}
+
+	// Background cleanup — вычищает stale/expired соединения из пула,
+	// чтобы первый клиент после паузы не получил мёртвое соединение.
+	go pool.cleanupLoop()
 
 	return pool
 }
@@ -251,12 +257,69 @@ func (p *DCPool) Close() error {
 		return nil // Уже закрыт
 	}
 
-	close(p.conns)
-	for conn := range p.conns {
-		conn.Close()
-		p.stats.closed.Add(1)
+	// Останавливаем background cleanup
+	close(p.stopCh)
+
+	// Дренируем и закрываем оставшиеся соединения.
+	// Не закрываем channel — cleanupLoop может ещё писать в него.
+	for {
+		select {
+		case conn := <-p.conns:
+			conn.Close()
+			p.stats.closed.Add(1)
+		default:
+			return nil
+		}
 	}
-	return nil
+}
+
+// cleanupLoop периодически удаляет stale соединения из пула.
+// Интервал = IdleTimeout/2 — достаточно часто чтобы stale соединения
+// не накапливались, но не слишком агрессивно.
+func (p *DCPool) cleanupLoop() {
+	interval := p.config.IdleTimeout / 2
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.evictStale()
+		}
+	}
+}
+
+// evictStale вычищает протухшие соединения из channel-based пула.
+// Дренит все соединения, проверяет здоровье, живые кладёт обратно.
+func (p *DCPool) evictStale() {
+	// Считаем сколько сейчас в пуле — дренируем ровно столько
+	n := len(p.conns)
+	for i := 0; i < n; i++ {
+		select {
+		case conn := <-p.conns:
+			if conn.isHealthy(p.config.IdleTimeout) {
+				// Живое — возвращаем
+				select {
+				case p.conns <- conn:
+				default:
+					// Пул заполнился (race с Put) — закрываем лишнее
+					conn.Close()
+					p.stats.closed.Add(1)
+				}
+			} else {
+				conn.Close()
+				p.stats.unhealthy.Add(1)
+			}
+		default:
+			return // Пул уже пуст
+		}
+	}
 }
 
 // Stats возвращает статистику пула.

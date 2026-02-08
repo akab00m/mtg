@@ -5,6 +5,7 @@ package relay
 import (
 	"io"
 	"net"
+	"runtime"
 	"syscall"
 
 	"github.com/9seconds/mtg/v2/essentials"
@@ -101,6 +102,10 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 				n2, err := unix.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), unix.SPLICE_F_MOVE|unix.SPLICE_F_MORE)
 				if err != nil {
 					if err == syscall.EAGAIN {
+						// dst send buffer полон — отдаём CPU вместо busy-wait spin.
+						// Без Gosched() горутина крутит цикл на 100% CPU пока буфер не освободится,
+						// потому что Go TCP сокеты работают в non-blocking режиме.
+						runtime.Gosched()
 						continue
 					}
 					fdErr = err
@@ -239,6 +244,8 @@ func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64
 				n2, err := unix.Splice(pipeFds[0], nil, dstFd, nil, int(n1-written), unix.SPLICE_F_MOVE|unix.SPLICE_F_MORE)
 				if err != nil {
 					if err == syscall.EAGAIN {
+						// dst send buffer полон — отдаём CPU вместо busy-wait spin.
+						runtime.Gosched()
 						continue
 					}
 					fdErr = err

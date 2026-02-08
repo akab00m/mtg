@@ -34,18 +34,23 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	// Это стандартный TCP behaviour (FIN/RST) — не создаёт fingerprint
 	go func() {
 		<-ctx.Done()
-		// Graceful close: сначала отключаем запись (FIN), потом закрываем
+		// Graceful close: отправляем FIN (CloseWrite) чтобы pump функции
+		// увидели EOF и завершились. Полный Close() выполнят defer'ы выше.
 		telegramConn.CloseWrite() //nolint: errcheck
 		clientConn.CloseWrite()   //nolint: errcheck
-		telegramConn.Close()
-		clientConn.Close()
 	}()
 
 	closeChan := make(chan struct{})
 
-	// Оптимизация TCP для всех соединений - критично для множества мелких пакетов
-	setTCPNoDelay(telegramConn) // Upload: client -> telegram
-	setTCPNoDelay(clientConn)   // Download: telegram -> client
+	// Оптимизация TCP для всех соединений — критично для множества мелких пакетов
+	setTCPNoDelay(telegramConn)
+	setTCPNoDelay(clientConn)
+
+	// TCP_USER_TIMEOUT: закрыть соединение если нет ACK 30 секунд.
+	// Без этого мёртвые соединения висят до TCP retransmit timeout (~15 мин),
+	// расходуя file descriptors и goroutine worker slots.
+	setTCPUserTimeout(telegramConn, 30000)
+	setTCPUserTimeout(clientConn, 30000)
 
 	// Создаём статистику для адаптивного управления буферами
 	downloadStats := NewStreamStats()
@@ -90,9 +95,11 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		setTCPQuickACK(src)
 		setTCPQuickACK(dst)
 
-		// TCP_NOTSENT_LOWAT - 16KB для лучшего throughput при download медиа
-		// Было 4KB - слишком агрессивно для больших файлов
-		setTCPNotSentLowat(dst, 16384)
+		// TCP_NOTSENT_LOWAT — порог неотправленных данных для wake-up epoll.
+		// 128KB = значение Cloudflare в production (blog 2022).
+		// Меньшие значения дают больше write events и overhead.
+		// При splice с 256KB pipe-буфером, 128KB обеспечивает 1-2 wake-up на pipe.
+		setTCPNotSentLowat(dst, 131072)
 	} else {
 		// Upload: client -> telegram
 		// Также применяем QUICKACK для снижения latency в обоих направлениях

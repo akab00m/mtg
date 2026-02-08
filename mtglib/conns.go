@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"sync"
+	"sync/atomic"
 
 	"github.com/9seconds/mtg/v2/essentials"
 )
@@ -40,30 +40,29 @@ func (c connTraffic) Write(b []byte) (int, error) {
 type connRewind struct {
 	essentials.Conn
 
-	active io.Reader
+	// active хранит текущий reader через atomic — lock-free переключение.
+	// До Rewind(): TeeReader(conn, buf). После: MultiReader(buf, conn).
+	active atomic.Pointer[io.Reader]
 	buf    bytes.Buffer
-	mutex  sync.RWMutex
 }
 
 func (c *connRewind) Read(p []byte) (int, error) {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	r := c.active.Load()
 
-	return c.active.Read(p) //nolint: wrapcheck
+	return (*r).Read(p) //nolint: wrapcheck
 }
 
 func (c *connRewind) Rewind() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	c.active = io.MultiReader(&c.buf, c.Conn)
+	mr := io.Reader(io.MultiReader(&c.buf, c.Conn))
+	c.active.Store(&mr)
 }
 
 func newConnRewind(conn essentials.Conn) *connRewind {
 	rv := &connRewind{
 		Conn: conn,
 	}
-	rv.active = io.TeeReader(conn, &rv.buf)
+	tr := io.Reader(io.TeeReader(conn, &rv.buf))
+	rv.active.Store(&tr)
 
 	return rv
 }

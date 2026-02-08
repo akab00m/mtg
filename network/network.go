@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/9seconds/mtg/v2/essentials"
@@ -94,42 +93,16 @@ func (n *network) dnsResolve(protocol, address string) ([]string, error) {
 		return ips, nil
 	}
 
-	// For tcp4/tcp6, use specific lookups
-	ips := []string{}
-	wg := &sync.WaitGroup{}
-	mutex := &sync.Mutex{}
+	// Для tcp4/tcp6 достаточно прямого вызова без goroutine/WaitGroup —
+	// это один lookup, параллелизм не нужен.
+	var ips []string
 
 	switch protocol {
 	case "tcp4":
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			resolved := n.dns.LookupA(address)
-
-			mutex.Lock()
-			ips = append(ips, resolved...)
-			mutex.Unlock()
-		}()
-	}
-
-	switch protocol {
+		ips = n.dns.LookupA(address)
 	case "tcp6":
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			resolved := n.dns.LookupAAAA(address)
-
-			mutex.Lock()
-			ips = append(ips, resolved...)
-			mutex.Unlock()
-		}()
+		ips = n.dns.LookupAAAA(address)
 	}
-
-	wg.Wait()
 
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("cannot find any ips for %s:%s", protocol, address)

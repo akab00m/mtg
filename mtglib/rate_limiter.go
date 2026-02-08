@@ -40,10 +40,24 @@ func NewRateLimiter(r rate.Limit, b int, cleanup time.Duration) *RateLimiter {
 
 // Allow checks if a request from the given IP should be allowed.
 func (rl *RateLimiter) Allow(ip net.IP) bool {
-	key := ip.String()
+	// string(ip) — raw bytes (4/16 байт), дешевле ip.String() (форматирование "1.2.3.4")
+	key := string(ip)
 
-	rl.mu.Lock()
+	// Fast path: для существующих IP достаточно RLock (read-only).
+	// lastUsed не обновляем — worst case: limiter пересоздастся при cleanup,
+	// что безопасно (rate сбросится, клиент получит больше, не меньше).
+	rl.mu.RLock()
 	limiter, exists := rl.limiters[key]
+	rl.mu.RUnlock()
+
+	if exists {
+		return limiter.Allow()
+	}
+
+	// Slow path: новый IP — нужен write lock
+	rl.mu.Lock()
+	// Double-check после escalation — другая goroutine могла добавить
+	limiter, exists = rl.limiters[key]
 	if !exists {
 		limiter = rate.NewLimiter(rl.r, rl.b)
 		rl.limiters[key] = limiter

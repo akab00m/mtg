@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,26 +157,27 @@ func (ab *AdaptiveBuffer) GetOptimalSize(throughput int64) int {
 	return ab.currentSize
 }
 
-// priorityHints применяет runtime hints для приоритетных goroutines.
-// ВАЖНО: Это НЕ влияет на wire-level traffic pattern.
+// priorityHints — placeholder для приоритизации потоков данных.
+// Реальная приоритизация download выполняется на уровне TCP:
+// - TCP_QUICKACK — немедленные ACK для download направления
+// - TCP_NOTSENT_LOWAT — быстрое уведомление о возможности записи
+// - TCP_NODELAY — отсутствие Nagle buffering
+//
+// ВАЖНО: runtime.LockOSThread() НЕ используется — он не приоритизирует goroutine,
+// а только привязывает к OS thread, что при тысячах connections создаёт O(N)
+// OS threads и деградирует Go scheduler (каждый заблокированный thread потребляет
+// ~8KB stack + scheduling overhead).
 type priorityHints struct{}
 
-// ApplyHighPriority применяет hints для высокоприоритетных операций (download).
-// Использует только безопасные методы без изменения сетевого трафика.
+// ApplyHighPriority — no-op. Приоритизация выполняется через TCP socket options.
 func (priorityHints) ApplyHighPriority() {
-	// Gosched отдаёт CPU другим goroutines, но download goroutine
-	// будет запускаться чаще благодаря тому, что она меньше блокируется
-	// (TCP_QUICKACK уменьшает ожидание ACK)
-
-	// LockOSThread привязывает goroutine к OS thread
-	// Это уменьшает context switch overhead для критичных операций
-	// НЕ влияет на wire-level — только на scheduling внутри процесса
-	runtime.LockOSThread()
+	// Намеренно оставлено пустым.
+	// TCP_QUICKACK и TCP_NOTSENT_LOWAT настраиваются в pump() перед relay.
 }
 
-// ReleaseHighPriority освобождает ресурсы после завершения приоритетной операции.
+// ReleaseHighPriority — no-op.
 func (priorityHints) ReleaseHighPriority() {
-	runtime.UnlockOSThread()
+	// Намеренно оставлено пустым.
 }
 
 // PriorityHints — синглтон для применения runtime hints.

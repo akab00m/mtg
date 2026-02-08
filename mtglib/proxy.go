@@ -92,10 +92,11 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 	}
 	defer ctx.Close()
 
-	// Set handshake deadline on connection
+	// Handshake deadline: сбрасывается ЯВНО после хендшейка, а не через defer.
+	// defer здесь нельзя — deadline остался бы активен во время relay, убивая
+	// все соединения через HandshakeTimeout секунд.
 	if p.config.HandshakeTimeout > 0 {
-		conn.SetDeadline(time.Now().Add(p.config.HandshakeTimeout))
-		defer conn.SetDeadline(time.Time{}) // Clear deadline after handshake
+		conn.SetDeadline(time.Now().Add(p.config.HandshakeTimeout)) //nolint: errcheck
 	}
 
 	go func() {
@@ -120,6 +121,10 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 
 		return
 	}
+
+	// Хендшейк завершён — сбрасываем deadline перед relay.
+	// TCP_USER_TIMEOUT (30s) в relay.go берёт на себя защиту от мёртвых соединений.
+	conn.SetDeadline(time.Time{}) //nolint: errcheck
 
 	if err := p.doTelegramCall(ctx); err != nil {
 		// Не логировать спам для несуществующих DC (203, 999 и т.д.)
@@ -178,8 +183,11 @@ func (p *Proxy) Serve(listener net.Listener) error {
 		switch {
 		case err == nil:
 		case errors.Is(err, ants.ErrPoolClosed):
+			conn.Close()
+
 			return nil
 		case errors.Is(err, ants.ErrPoolOverload):
+			conn.Close()
 			logger.Info("connection was concurrency limited")
 			p.eventStream.Send(p.ctx, NewEventConcurrencyLimited())
 		}
