@@ -65,7 +65,10 @@ func NewEventStream(observerFactories []ObserverFactory) EventStream {
 	}
 
 	for i := 0; i < runtime.NumCPU(); i++ {
-		rv.chans[i] = make(chan mtglib.Event, 1)
+		// Буфер 64: предотвращает блокировку relay при медленной обработке метрик.
+		// connTraffic.Send() вызывается на каждый Read/Write — при буфере 1
+		// relay ждёт observer'а, замедляя передачу данных клиенту.
+		rv.chans[i] = make(chan mtglib.Event, 64)
 
 		if len(observerFactories) == 1 {
 			go eventStreamProcessor(ctx, rv.chans[i], observerFactories[0]())

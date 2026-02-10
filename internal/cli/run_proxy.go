@@ -264,6 +264,10 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		EnableConnectionPool:      conf.ConnectionPool.Enabled.Get(false),
 		ConnectionPoolMaxIdle:     int(conf.ConnectionPool.MaxIdleConns.Get(5)),
 		ConnectionPoolIdleTimeout: conf.ConnectionPool.IdleTimeout.Value,
+
+		// Rate Limit settings
+		RateLimitPerSecond: float64(conf.RateLimit.PerSecond.Get(0)),
+		RateLimitBurst:     int(conf.RateLimit.Burst.Get(20)),
 	}
 
 	proxy, err := mtglib.NewProxy(opts)
@@ -364,11 +368,25 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		}
 	}
 
-	go proxy.Serve(listener) //nolint: errcheck
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- proxy.Serve(listener)
+	}()
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+		// Graceful shutdown по сигналу
+	case err := <-serveDone:
+		if err != nil {
+			logger.BindStr("error", err.Error()).Warning("proxy.Serve exited unexpectedly")
+		}
+	}
+
 	listener.Close()
 	proxy.Shutdown()
+
+	// Останавливаем network (DNS cache cleanup, resolver) для предотвращения утечки горутин
+	ntw.Stop()
 
 	return nil
 }

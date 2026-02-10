@@ -56,8 +56,10 @@ func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	}
 
 	// Создаём pipe для splice
+	// O_CLOEXEC — fd не утечёт в child process при exec
+	// O_NONBLOCK — не нужен дополнительный fcntl
 	var pipeFds [2]int
-	if err := syscall.Pipe(pipeFds[:]); err != nil {
+	if err := unix.Pipe2(pipeFds[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
 		return -1, nil
 	}
 	defer syscall.Close(pipeFds[0])
@@ -194,8 +196,10 @@ func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64
 	}
 
 	// Создаём pipe для splice
+	// O_CLOEXEC — fd не утечёт в child process при exec
+	// O_NONBLOCK — не нужен дополнительный fcntl
 	var pipeFds [2]int
-	if err := syscall.Pipe(pipeFds[:]); err != nil {
+	if err := unix.Pipe2(pipeFds[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
 		return -1, nil
 	}
 	defer syscall.Close(pipeFds[0])

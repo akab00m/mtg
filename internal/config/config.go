@@ -68,6 +68,19 @@ type Config struct {
 		// Default: 1m
 		IdleTimeout TypeDuration `json:"idleTimeout"`
 	} `json:"connectionPool"`
+	// RateLimit — ограничение количества handshakes на IP.
+	// Защищает от brute-force подбора секрета.
+	RateLimit struct {
+		Optional
+
+		// PerSecond — максимальное количество handshakes в секунду на IP.
+		// Default: 0 (отключено)
+		PerSecond TypeRateLimit `json:"perSecond"`
+
+		// Burst — максимальный burst для rate limiter.
+		// Default: 20
+		Burst TypeConcurrency `json:"burst"`
+	} `json:"rateLimit"`
 	Stats struct {
 		StatsD struct {
 			Optional
@@ -99,12 +112,16 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) String() string {
+	// Маскируем секрет для безопасного логирования
+	safe := *c
+	safe.Secret = mtglib.Secret{} // Zero value — не сериализует реальный секрет
+
 	buf := &bytes.Buffer{}
 	encoder := json.NewEncoder(buf)
 
 	encoder.SetEscapeHTML(false)
 
-	if err := encoder.Encode(c); err != nil {
+	if err := encoder.Encode(safe); err != nil {
 		panic(err)
 	}
 

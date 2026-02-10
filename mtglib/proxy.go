@@ -204,6 +204,11 @@ func (p *Proxy) Shutdown() {
 	p.allowlist.Shutdown()
 	p.blocklist.Shutdown()
 
+	// Остановка rate limiter cleanup goroutine (предотвращение goroutine leak)
+	if p.rateLimiter != nil {
+		p.rateLimiter.Stop()
+	}
+
 	// Закрытие connection pool к Telegram DC
 	p.telegram.Close()
 }
@@ -321,7 +326,12 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 
 	encryptor, decryptor, err := obfuscated2.ServerHandshake(conn)
 	if err != nil {
-		conn.Close()
+		// ForceClose: соединение с ошибкой handshake нельзя возвращать в пул
+		if pc, ok := conn.(*telegram.PooledConn); ok {
+			pc.ForceClose()
+		} else {
+			conn.Close()
+		}
 
 		// Retry с новым соединением при broken pipe (stale connection из pool)
 		if isBrokenPipeError(err) {
@@ -341,6 +351,13 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 		} else {
 			return fmt.Errorf("cannot perform obfuscated2 handshake: %w", err)
 		}
+	}
+
+	// After obfuscated2 handshake, соединение имеет per-session протокольное состояние.
+	// Unwrap PooledConn чтобы Close() реально закрыл TCP,
+	// а не возвращал использованное соединение в пул.
+	if pc, ok := conn.(*telegram.PooledConn); ok {
+		conn = pc.Unwrap()
 	}
 
 	ctx.telegramConn = obfuscated2.Conn{

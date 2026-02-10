@@ -278,7 +278,11 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 
 	factory := &PrometheusFactory{
 		httpServer: &http.Server{
-			Handler: mux,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,  // Защита от slowloris
+			ReadTimeout:       30 * time.Second,   // Максимум на чтение запроса
+			WriteTimeout:      30 * time.Second,   // Максимум на запись ответа
+			IdleTimeout:       60 * time.Second,   // Таймаут idle keep-alive
 		},
 
 		metricClientConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{

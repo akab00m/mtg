@@ -298,11 +298,24 @@ func (p *DCPool) cleanupLoop() {
 // evictStale вычищает протухшие соединения из channel-based пула.
 // Дренит все соединения, проверяет здоровье, живые кладёт обратно.
 func (p *DCPool) evictStale() {
+	// Если пул уже закрыт — не возвращаем соединения обратно.
+	// Это предотвращает race: Close() дренит channel, evictStale кладёт обратно.
+	if p.closed.Load() {
+		return
+	}
+
 	// Считаем сколько сейчас в пуле — дренируем ровно столько
 	n := len(p.conns)
 	for i := 0; i < n; i++ {
 		select {
 		case conn := <-p.conns:
+			// Повторная проверка closed после извлечения из channel
+			if p.closed.Load() {
+				conn.Close()
+				p.stats.closed.Add(1)
+				continue
+			}
+
 			if conn.isHealthy(p.config.IdleTimeout) {
 				// Живое — возвращаем
 				select {
@@ -462,6 +475,14 @@ func (c *PooledConn) ForceClose() error {
 		return nil
 	}
 	return c.Conn.Close()
+}
+
+// Unwrap извлекает внутреннее соединение и помечает PooledConn как закрытый.
+// Используется после установки состояния протокола (obfuscated2 handshake),
+// чтобы Close() на внутреннем соединении реально закрыл TCP, а не вернул в пул.
+func (c *PooledConn) Unwrap() essentials.Conn {
+	c.closed.Store(true)
+	return c.Conn
 }
 
 // RemoteAddr реализует net.Conn для совместимости.

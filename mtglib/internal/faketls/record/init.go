@@ -2,7 +2,17 @@ package record
 
 import "fmt"
 
-const TLSMaxRecordSize = 65535 // max uint16
+const TLSMaxRecordSize = 65535 // max uint16 — для чтения (принимаем любой валидный TLS record)
+
+// TLSMaxWriteRecordSize — максимальный размер TLS record при записи.
+// RFC 8446 Section 5.1: "The length MUST NOT exceed 2^14" (16384 bytes).
+// Отправка records > 16384 — fingerprint, реальные TLS стеки этого не делают.
+const TLSMaxWriteRecordSize = 16384
+
+// TLSMinWriteChunkSize — минимальный размер chunk при фрагментации.
+// Записи в 1-10 байт создают избыточные TLS record headers (5 байт на запись)
+// и являются fingerprint — реальные TLS стеки не фрагментируют так мелко.
+const TLSMinWriteChunkSize = 256
 
 type Type uint8
 

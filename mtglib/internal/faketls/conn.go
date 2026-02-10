@@ -53,7 +53,9 @@ func (c *Conn) Write(p []byte) (int, error) {
 	lenP := len(p)
 
 	for len(p) > 0 {
-		chunkSize := rand.Intn(record.TLSMaxRecordSize)
+		// RFC 8446: TLS records не больше 16384 байт.
+		// Минимум 256 — защита от fingerprint мелких records.
+		chunkSize := record.TLSMinWriteChunkSize + rand.Intn(record.TLSMaxWriteRecordSize-record.TLSMinWriteChunkSize)
 		if chunkSize > len(p) || chunkSize == 0 {
 			chunkSize = len(p)
 		}

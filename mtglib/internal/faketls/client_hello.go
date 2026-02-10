@@ -87,11 +87,28 @@ func ParseClientHello(secret, handshake []byte) (ClientHello, error) {
 	timestamp := int64(binary.LittleEndian.Uint32(computedRandom[RandomLen-4:]))
 	hello.Time = time.Unix(timestamp, 0)
 
-	parseSessionID(&hello, handshake)
-	parseCipherSuite(&hello, handshake)
-	parseSNI(&hello, handshake)
+	if err := safeParseFields(&hello, handshake); err != nil {
+		return hello, fmt.Errorf("failed to parse client hello fields: %w", err)
+	}
 
 	return hello, nil
+}
+
+// safeParseFields вызывает parse-функции с защитой от паники.
+// HMAC-проверка выше гарантирует аутентичность, но defense in depth
+// защищает от edge cases малформированных данных.
+func safeParseFields(hello *ClientHello, handshake []byte) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic parsing client hello fields: %v", r)
+		}
+	}()
+
+	parseSessionID(hello, handshake)
+	parseCipherSuite(hello, handshake)
+	parseSNI(hello, handshake)
+
+	return nil
 }
 
 func parseSessionID(hello *ClientHello, handshake []byte) {

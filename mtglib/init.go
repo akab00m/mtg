@@ -94,11 +94,6 @@ const (
 	// ConnectionIDBytesLength defines a count of random bytes used to generate a
 	// stream/connection ids.
 	ConnectionIDBytesLength = 16
-
-	// TCPRelayReadTimeout defines a max time period between two consecuitive
-	// reads from Telegram after which connection will be terminated. This is
-	// required to abort stale connections.
-	TCPRelayReadTimeout = 20 * time.Second
 )
 
 // Network defines a knowledge how to work with a network. It may sound fun but

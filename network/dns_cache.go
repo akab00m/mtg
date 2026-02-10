@@ -3,6 +3,7 @@ package network
 import (
 	"container/list"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,12 +24,12 @@ type LRUDNSCache struct {
 	maxSize  int
 	cache    map[string]*list.Element
 	lruList  *list.List
-	mutex    sync.RWMutex
+	mutex    sync.Mutex // Полный мьютекс для структурных операций (LRU reorder, evict)
 
-	// Metrics
-	hits   uint64
-	misses uint64
-	evictions uint64
+	// Метрики — атомарные счётчики, не требуют мьютекса для чтения
+	hits      atomic.Uint64
+	misses    atomic.Uint64
+	evictions atomic.Uint64
 }
 
 type lruCacheEntry struct {
@@ -56,7 +57,7 @@ func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 
 	elem, ok := c.cache[key]
 	if !ok {
-		c.misses++
+		c.misses.Add(1)
 		return nil
 	}
 
@@ -67,13 +68,13 @@ func (c *LRUDNSCache) Get(key string) *DNSCacheEntry {
 		// Remove expired entry
 		c.lruList.Remove(elem)
 		delete(c.cache, key)
-		c.misses++
+		c.misses.Add(1)
 		return nil
 	}
 
 	// Move to front (most recently used)
 	c.lruList.MoveToFront(elem)
-	c.hits++
+	c.hits.Add(1)
 	return entry
 }
 
@@ -123,15 +124,15 @@ func (c *LRUDNSCache) Set(key string, ips []string, ttl uint32) {
 			c.lruList.Remove(oldest)
 			oldEntry := oldest.Value.(*lruCacheEntry)
 			delete(c.cache, oldEntry.key)
-			c.evictions++
+			c.evictions.Add(1)
 		}
 	}
 }
 
 // Size returns current cache size
 func (c *LRUDNSCache) Size() int {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	return c.lruList.Len()
 }
 
@@ -145,23 +146,30 @@ type DNSCacheMetrics struct {
 	HitRate   float64 // Hit rate percentage
 }
 
-// GetMetrics returns current cache statistics
+// GetMetrics returns current cache statistics.
+// Атомарные счётчики читаются без мьютекса — lock-free для метрик.
 func (c *LRUDNSCache) GetMetrics() DNSCacheMetrics {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	hits := c.hits.Load()
+	misses := c.misses.Load()
+	evictions := c.evictions.Load()
 
-	totalRequests := c.hits + c.misses
+	totalRequests := hits + misses
 	var hitRate float64
 	if totalRequests > 0 {
-		hitRate = float64(c.hits) / float64(totalRequests) * 100.0
+		hitRate = float64(hits) / float64(totalRequests) * 100.0
 	}
 
+	// Размер требует lock (list.Len() не атомарная операция)
+	c.mutex.Lock()
+	size := c.lruList.Len()
+	c.mutex.Unlock()
+
 	return DNSCacheMetrics{
-		Size:      c.lruList.Len(),
+		Size:      size,
 		MaxSize:   c.maxSize,
-		Hits:      c.hits,
-		Misses:    c.misses,
-		Evictions: c.evictions,
+		Hits:      hits,
+		Misses:    misses,
+		Evictions: evictions,
 		HitRate:   hitRate,
 	}
 }
