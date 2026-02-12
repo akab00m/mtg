@@ -175,6 +175,21 @@ func (m multiObserver) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
 	wg.Wait()
 }
 
+func (m multiObserver) EventIPListCacheFallback(evt mtglib.EventIPListCacheFallback) {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(m.observers))
+
+	for _, v := range m.observers {
+		go func(obs Observer) {
+			defer wg.Done()
+
+			obs.EventIPListCacheFallback(evt)
+		}(v)
+	}
+
+	wg.Wait()
+}
+
 func (m multiObserver) Shutdown() {
 	for _, v := range m.observers {
 		v.Shutdown()

@@ -2,6 +2,8 @@ module github.com/9seconds/mtg/v2
 
 go 1.25
 
+toolchain go1.25.7
+
 require (
 	github.com/OneOfOne/xxhash v1.2.8
 	github.com/alecthomas/kong v1.13.0

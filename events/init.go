@@ -62,6 +62,9 @@ type Observer interface {
 	// EventPoolMetrics reacts on incoming mtglib.EventPoolMetrics event.
 	EventPoolMetrics(mtglib.EventPoolMetrics)
 
+	// EventIPListCacheFallback reacts on incoming mtglib.EventIPListCacheFallback event.
+	EventIPListCacheFallback(mtglib.EventIPListCacheFallback)
+
 	// Shutdown stop observer. Default event stream guarantees:
 	//   1. If shutdown is executed, it is executed only once
 	//   2. Observer won't receieve any new message after this

@@ -96,6 +96,14 @@ const (
 	//       ip_list | 'allowlist' or 'blocklist'
 	MetricIPListSize = "iplist_size"
 
+	// MetricIPListCacheFallback defines a metric for cases when remote list
+	// update failed and cached snapshot was used.
+	//
+	//     Type: counter
+	//     Tags:
+	//       ip_list | 'allowlist' or 'blocklist'
+	MetricIPListCacheFallback = "iplist_cache_fallback"
+
 	// MetricDNSCacheSize defines a metric for the current size of the DNS cache.
 	//
 	//     Type: gauge

@@ -393,6 +393,7 @@ Here goes a list of metrics with their types but without a prefix.
 | domain_fronting             | counter | –                                | Count of domain fronting events.                                                           |
 | concurrency_limited         | counter | –                                | Count of events, when client connection was rejected due to concurrency limit.             |
 | ip_blocklisted              | counter | `ip_list`                        | Count of events when client connection was rejected because IP was found in the blocklist. |
+| iplist_cache_fallback       | counter | `ip_list`                        | Count of list updates where remote fetch failed and cached snapshot was used.               |
 | replay_attacks              | counter | –                                | Count of detected replay attacks.                                                          |
 
 Tag meaning:
@@ -404,3 +405,19 @@ Tag meaning:
 | telegram_ip |                            | IP address of the Telegram server.            |
 | direction   | `to_client`, `from_client` | A direction of the traffic flow.              |
 | ip_list     | `allowlist`, `blocklist`   | A type of the IP list.                        |
+
+### Prometheus alert example
+
+```yaml
+groups:
+  - name: mtg-iplist
+    rules:
+      - alert: MTGIPListRemoteUnavailable
+        expr: increase(mtg_iplist_cache_fallback[15m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "mtg uses cached IP list snapshot"
+          description: "Remote block/allow list update failed, cache fallback activated"
+```

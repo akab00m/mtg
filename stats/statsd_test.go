@@ -220,6 +220,18 @@ func (suite *StatsdTestSuite) TestEventIPListSizeBlocklist() {
 	suite.Contains(suite.statsdServer.String(), "blocklist")
 }
 
+func (suite *StatsdTestSuite) TestEventIPListCacheFallback() {
+	suite.statsd.EventIPListCacheFallback(mtglib.NewEventIPListCacheFallback(false))
+	time.Sleep(statsdSleepTime)
+	suite.Contains(suite.statsdServer.String(), "mtg.iplist_cache_fallback:1|c")
+	suite.Contains(suite.statsdServer.String(), "allowlist")
+
+	suite.statsd.EventIPListCacheFallback(mtglib.NewEventIPListCacheFallback(true))
+	time.Sleep(statsdSleepTime)
+	suite.Contains(suite.statsdServer.String(), "mtg.iplist_cache_fallback:1|c")
+	suite.Contains(suite.statsdServer.String(), "blocklist")
+}
+
 func TestStatsd(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &StatsdTestSuite{})

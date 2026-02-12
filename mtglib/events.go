@@ -102,6 +102,14 @@ type EventIPListSize struct {
 	IsBlockList bool
 }
 
+// EventIPListCacheFallback is emitted when remote ip list update fails and
+// cached snapshot is used instead.
+type EventIPListCacheFallback struct {
+	eventBase
+
+	IsBlockList bool
+}
+
 // NewEventStart creates a new EventStart event.
 func NewEventStart(streamID string, remoteIP net.IP) EventStart {
 	return EventStart{
@@ -207,6 +215,16 @@ func NewEventIPListSize(size int, isBlockList bool) EventIPListSize {
 			timestamp: time.Now(),
 		},
 		Size:        size,
+		IsBlockList: isBlockList,
+	}
+}
+
+// NewEventIPListCacheFallback creates a new EventIPListCacheFallback event.
+func NewEventIPListCacheFallback(isBlockList bool) EventIPListCacheFallback {
+	return EventIPListCacheFallback{
+		eventBase: eventBase{
+			timestamp: time.Now(),
+		},
 		IsBlockList: isBlockList,
 	}
 }

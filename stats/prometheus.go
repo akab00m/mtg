@@ -148,6 +148,15 @@ func (p prometheusProcessor) EventIPListSize(evt mtglib.EventIPListSize) {
 	p.factory.metricIPListSize.WithLabelValues(tag).Set(float64(evt.Size))
 }
 
+func (p prometheusProcessor) EventIPListCacheFallback(evt mtglib.EventIPListCacheFallback) {
+	tag := TagIPListBlock
+	if !evt.IsBlockList {
+		tag = TagIPListAllow
+	}
+
+	p.factory.metricIPListCacheFallback.WithLabelValues(tag).Inc()
+}
+
 func (p prometheusProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
 	p.factory.UpdateDNSCacheMetrics(evt.DeltaHits, evt.DeltaMisses, evt.DeltaEvictions, evt.Size)
 }
@@ -179,6 +188,7 @@ type PrometheusFactory struct {
 	metricTelegramTraffic       *prometheus.CounterVec
 	metricDomainFrontingTraffic *prometheus.CounterVec
 	metricIPBlocklisted         *prometheus.CounterVec
+	metricIPListCacheFallback   *prometheus.CounterVec
 
 	metricDomainFronting     prometheus.Counter
 	metricConcurrencyLimited prometheus.Counter
@@ -244,8 +254,8 @@ func (p *PrometheusFactory) UpdatePoolMetrics(dc int, hits, misses, unhealthy ui
 	dcStr := strconv.Itoa(dc)
 	// Reset and set counters based on total values
 	// Note: Prometheus counters are monotonic, so we use Add with delta
-	p.metricPoolHits.WithLabelValues(dcStr).Add(0)    // Just touch to create label
-	p.metricPoolMisses.WithLabelValues(dcStr).Add(0)  // Just touch to create label
+	p.metricPoolHits.WithLabelValues(dcStr).Add(0)   // Just touch to create label
+	p.metricPoolMisses.WithLabelValues(dcStr).Add(0) // Just touch to create label
 	p.metricPoolUnhealthy.WithLabelValues(dcStr).Add(0)
 	p.metricPoolIdle.WithLabelValues(dcStr).Set(float64(idle))
 }
@@ -279,10 +289,10 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 	factory := &PrometheusFactory{
 		httpServer: &http.Server{
 			Handler:           mux,
-			ReadHeaderTimeout: 10 * time.Second,  // Защита от slowloris
-			ReadTimeout:       30 * time.Second,   // Максимум на чтение запроса
-			WriteTimeout:      30 * time.Second,   // Максимум на запись ответа
-			IdleTimeout:       60 * time.Second,   // Таймаут idle keep-alive
+			ReadHeaderTimeout: 10 * time.Second, // Защита от slowloris
+			ReadTimeout:       30 * time.Second, // Максимум на чтение запроса
+			WriteTimeout:      30 * time.Second, // Максимум на запись ответа
+			IdleTimeout:       60 * time.Second, // Таймаут idle keep-alive
 		},
 
 		metricClientConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -320,6 +330,11 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 			Namespace: metricPrefix,
 			Name:      MetricIPBlocklisted,
 			Help:      "A number of rejected sessions due to ip blocklisting.",
+		}, []string{TagIPList}),
+		metricIPListCacheFallback: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: metricPrefix,
+			Name:      MetricIPListCacheFallback,
+			Help:      "A number of updates where cached ip list snapshot was used after remote fetch failure.",
 		}, []string{TagIPList}),
 
 		metricDomainFronting: prometheus.NewCounter(prometheus.CounterOpts{
@@ -417,6 +432,7 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 	registry.MustRegister(factory.metricTelegramTraffic)
 	registry.MustRegister(factory.metricDomainFrontingTraffic)
 	registry.MustRegister(factory.metricIPBlocklisted)
+	registry.MustRegister(factory.metricIPListCacheFallback)
 
 	registry.MustRegister(factory.metricDomainFronting)
 	registry.MustRegister(factory.metricConcurrencyLimited)

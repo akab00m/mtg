@@ -5,7 +5,10 @@
 // of this abstraction.
 package ipblocklist
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const (
 	// DefaultFireholDownloadConcurrency defines a default max number of
@@ -16,3 +19,7 @@ const (
 	// requests updates of the blocklists.
 	DefaultFireholUpdateEach = 6 * time.Hour
 )
+
+// FireholCacheFallbackCallback defines callback invoked when cached snapshot
+// is used after remote update failure.
+type FireholCacheFallbackCallback func(context.Context)

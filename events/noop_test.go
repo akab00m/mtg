@@ -19,15 +19,16 @@ type NoopTestSuite struct {
 
 func (suite *NoopTestSuite) SetupSuite() {
 	suite.testData = map[string]mtglib.Event{
-		"start":               mtglib.NewEventStart("connID", net.ParseIP("127.0.0.1")),
-		"connected-to-dc":     mtglib.NewEventConnectedToDC("connID", net.ParseIP("127.1.0.1"), 2),
-		"domain-fronting":     mtglib.NewEventDomainFronting("connID"),
-		"traffic":             mtglib.NewEventTraffic("connID", 1000, true),
-		"finish":              mtglib.NewEventFinish("connID"),
-		"concurrency-limited": mtglib.NewEventConcurrencyLimited(),
-		"ip-blacklisted":      mtglib.NewEventIPBlocklisted(net.ParseIP("10.0.0.10")),
-		"replay-attack":       mtglib.NewEventReplayAttack("connID"),
-		"ip-list-size":        mtglib.NewEventIPListSize(10, true),
+		"start":                  mtglib.NewEventStart("connID", net.ParseIP("127.0.0.1")),
+		"connected-to-dc":        mtglib.NewEventConnectedToDC("connID", net.ParseIP("127.1.0.1"), 2),
+		"domain-fronting":        mtglib.NewEventDomainFronting("connID"),
+		"traffic":                mtglib.NewEventTraffic("connID", 1000, true),
+		"finish":                 mtglib.NewEventFinish("connID"),
+		"concurrency-limited":    mtglib.NewEventConcurrencyLimited(),
+		"ip-blacklisted":         mtglib.NewEventIPBlocklisted(net.ParseIP("10.0.0.10")),
+		"replay-attack":          mtglib.NewEventReplayAttack("connID"),
+		"ip-list-size":           mtglib.NewEventIPListSize(10, true),
+		"ip-list-cache-fallback": mtglib.NewEventIPListCacheFallback(true),
 	}
 	suite.ctx = context.Background()
 }
@@ -68,6 +69,8 @@ func (suite *NoopTestSuite) TestObserver() {
 				observer.EventReplayAttack(typedEvt)
 			case mtglib.EventIPListSize:
 				observer.EventIPListSize(typedEvt)
+			case mtglib.EventIPListCacheFallback:
+				observer.EventIPListCacheFallback(typedEvt)
 			}
 		})
 	}

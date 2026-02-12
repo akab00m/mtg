@@ -113,7 +113,7 @@ func (a *Access) getIP(ntw mtglib.Network, protocol string) net.IP {
 
 	req, err := http.NewRequest(http.MethodGet, "https://ifconfig.co", nil) //nolint: noctx
 	if err != nil {
-		panic(err)
+		return nil
 	}
 
 	req.Header.Add("Accept", "text/plain")

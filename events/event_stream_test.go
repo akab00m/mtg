@@ -225,6 +225,26 @@ func (suite *EventStreamTestSuite) TestEventIPListSize() {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func (suite *EventStreamTestSuite) TestEventIPListCacheFallback() {
+	evt := mtglib.NewEventIPListCacheFallback(true)
+
+	for _, v := range []*ObserverMock{suite.observerMock1, suite.observerMock2} {
+		v.
+			On("EventIPListCacheFallback", mock.Anything).
+			Once().
+			Run(func(args mock.Arguments) {
+				caught, ok := args.Get(0).(mtglib.EventIPListCacheFallback)
+
+				suite.True(ok)
+				suite.Equal(evt.Timestamp(), caught.Timestamp())
+				suite.Equal(evt.IsBlockList, caught.IsBlockList)
+			})
+	}
+
+	suite.stream.Send(suite.ctx, evt)
+	time.Sleep(100 * time.Millisecond)
+}
+
 func (suite *EventStreamTestSuite) TearDownTest() {
 	suite.stream.Shutdown()
 	suite.ctxCancel()

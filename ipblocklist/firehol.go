@@ -3,8 +3,13 @@ package ipblocklist
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -46,8 +51,9 @@ type Firehol struct {
 	logger      mtglib.Logger
 	updateMutex sync.RWMutex
 
-	updateCallback FireholUpdateCallback
-	ranger         cidranger.Ranger
+	updateCallback        FireholUpdateCallback
+	cacheFallbackCallback FireholCacheFallbackCallback
+	ranger                cidranger.Ranger
 
 	blocklists []files.File
 
@@ -57,6 +63,12 @@ type Firehol struct {
 // Shutdown stop a background update process.
 func (f *Firehol) Shutdown() {
 	f.ctxCancel()
+}
+
+// SetCacheFallbackCallback sets callback which is called when cached snapshot
+// is used because remote list fetch failed.
+func (f *Firehol) SetCacheFallbackCallback(callback FireholCacheFallbackCallback) {
+	f.cacheFallbackCallback = callback
 }
 
 // Contains is given IP list can be found in FireHOL blocklists.
@@ -123,16 +135,7 @@ func (f *Firehol) update() {
 
 			logger := f.logger.BindStr("filename", file.String())
 
-			fileContent, err := file.Open(ctx)
-			if err != nil {
-				logger.WarningError("update has failed", err)
-
-				return
-			}
-
-			defer fileContent.Close()
-
-			if err := f.updateFromFile(mutex, ranger, bufio.NewScanner(fileContent)); err != nil {
+			if err := f.updateFromSource(ctx, mutex, ranger, file, logger); err != nil {
 				logger.WarningError("update has failed", err)
 			}
 		}(v)
@@ -150,6 +153,133 @@ func (f *Firehol) update() {
 	}
 
 	f.logger.Info("ip list was updated")
+}
+
+func (f *Firehol) updateFromSource(ctx context.Context,
+	mutex sync.Locker,
+	ranger cidranger.Ranger,
+	file files.File,
+	logger mtglib.Logger,
+) error {
+	if !isRemoteBlocklist(file) {
+		fileContent, err := file.Open(ctx)
+		if err != nil {
+			return err
+		}
+
+		defer fileContent.Close()
+
+		return f.updateFromFile(mutex, ranger, bufio.NewScanner(fileContent))
+	}
+
+	return f.updateFromRemoteWithCache(ctx, mutex, ranger, file, logger)
+}
+
+func (f *Firehol) updateFromRemoteWithCache(ctx context.Context,
+	mutex sync.Locker,
+	ranger cidranger.Ranger,
+	file files.File,
+	logger mtglib.Logger,
+) error {
+	fileContent, err := file.Open(ctx)
+	if err != nil {
+		return f.updateFromCache(ctx, mutex, ranger, file, logger, err)
+	}
+
+	tmpFilePath, err := f.saveRemoteSnapshot(file, fileContent)
+	if err != nil {
+		return f.updateFromCache(ctx, mutex, ranger, file, logger, err)
+	}
+	defer os.Remove(tmpFilePath)
+
+	tmpFile, err := os.Open(tmpFilePath)
+	if err != nil {
+		return f.updateFromCache(ctx, mutex, ranger, file, logger, err)
+	}
+
+	err = f.updateFromFile(mutex, ranger, bufio.NewScanner(tmpFile))
+	tmpFile.Close()
+
+	if err != nil {
+		return f.updateFromCache(ctx, mutex, ranger, file, logger, err)
+	}
+
+	if err := f.commitRemoteSnapshot(file, tmpFilePath); err != nil {
+		logger.WarningError("cannot save blocklist cache", err)
+	}
+
+	return nil
+}
+
+func (f *Firehol) updateFromCache(ctx context.Context,
+	mutex sync.Locker,
+	ranger cidranger.Ranger,
+	file files.File,
+	logger mtglib.Logger,
+	reason error,
+) error {
+	cacheFile, err := os.Open(f.cachePath(file))
+	if err != nil {
+		return fmt.Errorf("cannot update from remote and cache is unavailable: %w", reason)
+	}
+	defer cacheFile.Close()
+
+	logger.Warning("using cached blocklist snapshot")
+	if f.cacheFallbackCallback != nil {
+		f.cacheFallbackCallback(ctx)
+	}
+
+	if err := f.updateFromFile(mutex, ranger, bufio.NewScanner(cacheFile)); err != nil {
+		return fmt.Errorf("cannot update from remote and cached snapshot is invalid: %w", err)
+	}
+
+	return nil
+}
+
+func (f *Firehol) saveRemoteSnapshot(file files.File, fileContent io.ReadCloser) (string, error) {
+	defer fileContent.Close()
+
+	if err := os.MkdirAll(f.cacheDir(), 0o700); err != nil {
+		return "", fmt.Errorf("cannot create cache dir: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(f.cacheDir(), "snapshot-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("cannot create temp snapshot file: %w", err)
+	}
+
+	if _, err := io.Copy(tmpFile, fileContent); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+
+		return "", fmt.Errorf("cannot save remote snapshot: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpFile.Name())
+
+		return "", fmt.Errorf("cannot close temp snapshot file: %w", err)
+	}
+
+	return tmpFile.Name(), nil
+}
+
+func (f *Firehol) commitRemoteSnapshot(file files.File, tmpFilePath string) error {
+	return os.Rename(tmpFilePath, f.cachePath(file))
+}
+
+func (f *Firehol) cacheDir() string {
+	return filepath.Join(os.TempDir(), "mtg-firehol-cache")
+}
+
+func (f *Firehol) cachePath(file files.File) string {
+	sum := sha256.Sum256([]byte(file.String()))
+	return filepath.Join(f.cacheDir(), hex.EncodeToString(sum[:])+".ipset")
+}
+
+func isRemoteBlocklist(file files.File) bool {
+	value := strings.ToLower(file.String())
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func (f *Firehol) updateFromFile(mutex sync.Locker,

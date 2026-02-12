@@ -83,7 +83,7 @@ func Parse(rawData []byte) (*Config, error) {
 	}
 
 	if err := jsonEncoder.Encode(tomlConf); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("cannot encode parsed config: %w", err)
 	}
 
 	if err := json.NewDecoder(jsonBuf).Decode(conf); err != nil {

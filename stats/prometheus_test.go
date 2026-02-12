@@ -192,6 +192,18 @@ func (suite *PrometheusTestSuite) TestEventIPListSize() {
 	suite.Contains(data, `mtg_iplist_size{ip_list="blocklist"} 3`)
 }
 
+func (suite *PrometheusTestSuite) TestEventIPListCacheFallback() {
+	suite.prometheus.EventIPListCacheFallback(mtglib.NewEventIPListCacheFallback(false))
+	suite.prometheus.EventIPListCacheFallback(mtglib.NewEventIPListCacheFallback(true))
+
+	time.Sleep(100 * time.Millisecond)
+
+	data, err := suite.Get()
+	suite.NoError(err)
+	suite.Contains(data, `mtg_iplist_cache_fallback{ip_list="allowlist"} 1`)
+	suite.Contains(data, `mtg_iplist_cache_fallback{ip_list="blocklist"} 1`)
+}
+
 func (suite *PrometheusTestSuite) TestBuildInfo() {
 	// Build info should be set immediately on creation
 	data, err := suite.Get()

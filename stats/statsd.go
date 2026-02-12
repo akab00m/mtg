@@ -135,6 +135,15 @@ func (s statsdProcessor) EventIPListSize(evt mtglib.EventIPListSize) {
 	s.client.Gauge(MetricIPListSize, int64(evt.Size), statsd.StringTag(TagIPList, tag))
 }
 
+func (s statsdProcessor) EventIPListCacheFallback(evt mtglib.EventIPListCacheFallback) {
+	tag := TagIPListBlock
+	if !evt.IsBlockList {
+		tag = TagIPListAllow
+	}
+
+	s.client.Incr(MetricIPListCacheFallback, 1, statsd.StringTag(TagIPList, tag))
+}
+
 func (s statsdProcessor) EventDNSCacheMetrics(evt mtglib.EventDNSCacheMetrics) {
 	s.client.Gauge(MetricDNSCacheSize, int64(evt.Size))
 	s.client.Incr(MetricDNSCacheHits, int64(evt.DeltaHits))

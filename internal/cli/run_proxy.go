@@ -95,6 +95,7 @@ func makeIPBlocklist(conf config.ListConfig,
 	logger mtglib.Logger,
 	ntw mtglib.Network,
 	updateCallback ipblocklist.FireholUpdateCallback,
+	cacheFallbackCallback ipblocklist.FireholCacheFallbackCallback,
 ) (mtglib.IPBlocklist, error) {
 	if !conf.Enabled.Get(false) {
 		return ipblocklist.NewNoop(), nil
@@ -121,6 +122,10 @@ func makeIPBlocklist(conf config.ListConfig,
 		return nil, fmt.Errorf("incorrect parameters for firehol: %w", err)
 	}
 
+	if cacheFallbackCallback != nil {
+		blocklist.SetCacheFallbackCallback(cacheFallbackCallback)
+	}
+
 	go blocklist.Run(conf.UpdateEach.Get(ipblocklist.DefaultFireholUpdateEach))
 
 	return blocklist, nil
@@ -130,6 +135,7 @@ func makeIPAllowlist(conf config.ListConfig,
 	logger mtglib.Logger,
 	ntw mtglib.Network,
 	updateCallback ipblocklist.FireholUpdateCallback,
+	cacheFallbackCallback ipblocklist.FireholCacheFallbackCallback,
 ) (mtglib.IPBlocklist, error) {
 	var (
 		allowlist mtglib.IPBlocklist
@@ -156,6 +162,7 @@ func makeIPAllowlist(conf config.ListConfig,
 			logger,
 			ntw,
 			updateCallback,
+			cacheFallbackCallback,
 		)
 	}
 
@@ -227,6 +234,9 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		ntw,
 		func(ctx context.Context, size int) {
 			eventStream.Send(ctx, mtglib.NewEventIPListSize(size, true))
+		},
+		func(ctx context.Context) {
+			eventStream.Send(ctx, mtglib.NewEventIPListCacheFallback(true))
 		})
 	if err != nil {
 		return fmt.Errorf("cannot build ip blocklist: %w", err)
@@ -238,6 +248,9 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		ntw,
 		func(ctx context.Context, size int) {
 			eventStream.Send(ctx, mtglib.NewEventIPListSize(size, false))
+		},
+		func(ctx context.Context) {
+			eventStream.Send(ctx, mtglib.NewEventIPListCacheFallback(false))
 		},
 	)
 	if err != nil {

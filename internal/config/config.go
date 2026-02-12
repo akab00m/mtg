@@ -101,7 +101,7 @@ type Config struct {
 
 func (c *Config) Validate() error {
 	if !c.Secret.Valid() {
-		return fmt.Errorf("invalid secret %s", c.Secret.String())
+		return fmt.Errorf("invalid secret")
 	}
 
 	if c.BindTo.Get("") == "" {
@@ -122,7 +122,7 @@ func (c *Config) String() string {
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(safe); err != nil {
-		panic(err)
+		return "{}"
 	}
 
 	return buf.String()

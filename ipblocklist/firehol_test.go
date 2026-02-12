@@ -144,6 +144,47 @@ func (suite *FireholTestSuite) TestMixed() {
 	time.Sleep(500 * time.Millisecond)
 }
 
+func (suite *FireholTestSuite) TestRemoteCacheFallback() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cache.ipset", func(w http.ResponseWriter, req *http.Request) {
+		_, _ = io.WriteString(w, "10.9.9.9\n")
+	})
+
+	remoteServer := httptest.NewServer(mux)
+	remoteURL := remoteServer.URL + "/cache.ipset"
+
+	dialer, _ := network.NewDefaultDialer(0, 0)
+	ntw, _ := network.NewNetwork(dialer, "mtg", "1.1.1.1", 0)
+
+	blocklistWarmup, err := ipblocklist.NewFirehol(logger.NewNoopLogger(),
+		ntw, 1,
+		[]string{remoteURL}, nil, nil)
+	suite.NoError(err)
+
+	go blocklistWarmup.Run(time.Hour)
+	time.Sleep(500 * time.Millisecond)
+
+	suite.True(blocklistWarmup.Contains(net.ParseIP("10.9.9.9")))
+
+	blocklistWarmup.Shutdown()
+	time.Sleep(500 * time.Millisecond)
+
+	remoteServer.Close()
+
+	blocklistFallback, err := ipblocklist.NewFirehol(logger.NewNoopLogger(),
+		ntw, 1,
+		[]string{remoteURL}, nil, nil)
+	suite.NoError(err)
+
+	go blocklistFallback.Run(time.Hour)
+	time.Sleep(500 * time.Millisecond)
+
+	suite.True(blocklistFallback.Contains(net.ParseIP("10.9.9.9")))
+
+	blocklistFallback.Shutdown()
+	time.Sleep(500 * time.Millisecond)
+}
+
 func TestFirehol(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &FireholTestSuite{})

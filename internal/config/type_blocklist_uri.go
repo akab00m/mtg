@@ -2,9 +2,12 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 type TypeBlocklistURI struct {
@@ -47,6 +50,26 @@ func (t *TypeBlocklistURI) Set(value string) error {
 		return fmt.Errorf("incorrect url %s", value)
 	}
 
+	if parsedURL.User != nil {
+		return fmt.Errorf("credentials in url are not allowed (%s)", value)
+	}
+
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("incorrect host in url %s", value)
+	}
+
+	if port := parsedURL.Port(); port != "" {
+		portNo, err := strconv.Atoi(port)
+		if err != nil || portNo <= 0 || portNo > 65535 {
+			return fmt.Errorf("incorrect port in url %s", value)
+		}
+	}
+
+	if isBlockedRemoteHost(hostname) {
+		return fmt.Errorf("blocked host in url %s", value)
+	}
+
 	t.Value = parsedURL.String()
 
 	return nil
@@ -58,6 +81,27 @@ func (t TypeBlocklistURI) Get(defaultValue string) string {
 	}
 
 	return t.Value
+}
+
+func isBlockedRemoteHost(hostname string) bool {
+	host := strings.ToLower(strings.TrimSpace(hostname))
+
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast()
 }
 
 func (t TypeBlocklistURI) IsRemote() bool {

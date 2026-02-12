@@ -16,7 +16,7 @@ type httpFile struct {
 func (h httpFile) Open(ctx context.Context) (io.ReadCloser, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.url, nil)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("cannot create request for %s: %w", h.url, err)
 	}
 
 	response, err := h.http.Do(request)
