@@ -69,7 +69,7 @@ func newStreamContext(ctx context.Context, logger Logger, clientConn essentials.
 	}
 	streamCtx.logger = logger.
 		BindStr("stream-id", streamCtx.streamID).
-		BindStr("client-ip", streamCtx.ClientIP().String())
+		BindStr("client-ip", hashIP(streamCtx.ClientIP()))
 
 	return streamCtx, nil
 }

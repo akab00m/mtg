@@ -81,6 +81,14 @@ type Config struct {
 		// Default: 20
 		Burst TypeConcurrency `json:"burst"`
 	} `json:"rateLimit"`
+	// AntiFingerprint — настройки противодействия DPI-анализу.
+	AntiFingerprint struct {
+		// CCSPadding включает инъекцию dummy ChangeCipherSpec records
+		// между ApplicationData records (~15% вероятность).
+		// Эффект: затрудняет traffic analysis по подсчёту records и timing.
+		// Default: false
+		CCSPadding TypeBool `json:"ccsPadding"`
+	} `json:"antiFingerprint"`
 	Stats struct {
 		StatsD struct {
 			Optional

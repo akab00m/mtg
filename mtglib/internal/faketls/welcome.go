@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	mrand "math/rand"
 
 	"github.com/9seconds/mtg/v2/mtglib/internal/faketls/record"
 	"golang.org/x/crypto/curve25519"
@@ -37,7 +36,7 @@ func SendWelcomePacket(writer io.Writer, secret []byte, clientHello ClientHello)
 	rec.Type = record.TypeApplicationData
 	rec.Version = record.Version12
 
-	if _, err := io.CopyN(&rec.Payload, rand.Reader, int64(1024+mrand.Intn(3092))); err != nil { //nolint: gomnd
+	if _, err := io.CopyN(&rec.Payload, rand.Reader, int64(1024+secureRandIntn(3092))); err != nil { //nolint: gomnd
 		return fmt.Errorf("cannot generate random padding: %w", err)
 	}
 
@@ -86,6 +85,13 @@ func generateServerHello(writer io.Writer, clientHello ClientHello) {
 	}
 
 	curve, _ := curve25519.X25519(scalar[:], curve25519.Basepoint)
+
+	// SECURITY: Зачистка приватного ключа из памяти.
+	// Предотвращает утечку через core dump или cold boot атаку.
+	for i := range scalar {
+		scalar[i] = 0
+	}
+
 	bodyBuf.Write(curve)
 
 	header := [4]byte{0, 0, 0, 0}

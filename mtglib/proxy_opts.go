@@ -155,6 +155,12 @@ type ProxyOpts struct {
 	//
 	// This is an optional setting. Default: 1 minute
 	ConnectionPoolIdleTimeout time.Duration
+
+	// EnableCCSPadding включает инъекцию dummy CCS records в FakeTLS поток.
+	// Затрудняет DPI-анализ по подсчёту TLS records и timing.
+	//
+	// This is an optional setting. Default: false
+	EnableCCSPadding bool
 }
 
 func (p ProxyOpts) valid() error {

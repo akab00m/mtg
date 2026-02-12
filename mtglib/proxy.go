@@ -46,6 +46,7 @@ type Proxy struct {
 
 	allowFallbackOnUnknownDC bool
 	fallbackOnDialError      bool
+	enableCCSPadding         bool
 	tolerateTimeSkewness     time.Duration
 	domainFrontingPort       int
 	workerPool               *ants.PoolWithFunc
@@ -76,7 +77,7 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 	// Rate limiting check BEFORE creating stream context
 	ipAddr := conn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
 	if p.rateLimiter != nil && !p.rateLimiter.Allow(ipAddr) {
-		p.logger.BindStr("ip", ipAddr.String()).Warning("Rate limited")
+		p.logger.BindStr("ip", hashIP(ipAddr)).Warning("Rate limited")
 		p.eventStream.Send(p.ctx, NewEventConcurrencyLimited())
 		conn.Close()
 
@@ -160,7 +161,7 @@ func (p *Proxy) Serve(listener net.Listener) error {
 		}
 
 		ipAddr := conn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
-		logger := p.logger.BindStr("ip", ipAddr.String())
+		logger := p.logger.BindStr("ip", hashIP(ipAddr))
 
 		if !p.allowlist.Contains(ipAddr) {
 			conn.Close()
@@ -265,7 +266,8 @@ func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
 	}
 
 	ctx.clientConn = &faketls.Conn{
-		Conn: ctx.clientConn,
+		Conn:             ctx.clientConn,
+		EnableCCSPadding: p.enableCCSPadding,
 	}
 
 	return true
@@ -463,6 +465,7 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		tolerateTimeSkewness:     opts.getTolerateTimeSkewness(),
 		allowFallbackOnUnknownDC: opts.AllowFallbackOnUnknownDC,
 		fallbackOnDialError:      opts.getFallbackOnDialError(),
+		enableCCSPadding:         opts.EnableCCSPadding,
 		telegram:                 tg,
 		config:                   config,
 		rateLimiter:              rateLimiter,

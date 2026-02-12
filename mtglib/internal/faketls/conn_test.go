@@ -147,6 +147,93 @@ func (suite *ConnTestSuite) TestWrite() {
 	suite.Equal(dataToRec, buf.Bytes())
 }
 
+// TestWriteChromeLikeRecordSizes проверяет, что Chrome-like распределение
+// создаёт полные 16384-байтные records для больших данных.
+func (suite *ConnTestSuite) TestWriteChromeLikeRecordSizes() {
+	suite.connMock.On("Write", mock.Anything).Return(0, nil)
+
+	// 16384*3 + 100 байт — ожидаем 3 полных record + 1 с остатком
+	dataSize := record.TLSMaxWriteRecordSize*3 + 100
+	data := make([]byte, dataSize)
+	rand.Read(data)
+
+	n, err := suite.c.Write(data)
+	suite.NoError(err)
+	suite.Equal(dataSize, n)
+
+	rec := record.AcquireRecord()
+	defer record.ReleaseRecord(rec)
+
+	var recordSizes []int
+
+	for {
+		if err := rec.Read(&suite.connMock.writeBuffer); err != nil {
+			break
+		}
+
+		suite.Equal(record.TypeApplicationData, rec.Type)
+		recordSizes = append(recordSizes, rec.Payload.Len())
+	}
+
+	// Ожидаем 4 records: 3 × 16384 + 1 × 100
+	suite.Len(recordSizes, 4)
+	suite.Equal(record.TLSMaxWriteRecordSize, recordSizes[0])
+	suite.Equal(record.TLSMaxWriteRecordSize, recordSizes[1])
+	suite.Equal(record.TLSMaxWriteRecordSize, recordSizes[2])
+	suite.Equal(100, recordSizes[3])
+}
+
+// TestWriteWithCCSPadding проверяет, что CCS padding не повреждает данные.
+// CCS records должны игнорироваться при reconstruction данных.
+func (suite *ConnTestSuite) TestWriteWithCCSPadding() {
+	suite.c.EnableCCSPadding = true
+	suite.connMock.On("Write", mock.Anything).Return(0, nil)
+
+	// Многократная запись — CCS инъекция вероятностная (~15%),
+	// при 100 итерациях хотя бы одна должна содержать CCS
+	rec := record.AcquireRecord()
+	defer record.ReleaseRecord(rec)
+
+	ccsCount := 0
+
+	for i := 0; i < 100; i++ {
+		suite.connMock.writeBuffer.Reset()
+
+		data := make([]byte, 1024)
+		rand.Read(data)
+
+		n, err := suite.c.Write(data)
+		suite.NoError(err)
+		suite.Equal(1024, n)
+
+		// Reconstruction: собираем ApplicationData, считаем CCS
+		reconstructed := &bytes.Buffer{}
+
+		for {
+			if err := rec.Read(&suite.connMock.writeBuffer); err != nil {
+				break
+			}
+
+			switch rec.Type { //nolint: exhaustive
+			case record.TypeApplicationData:
+				rec.Payload.WriteTo(reconstructed) //nolint: errcheck
+			case record.TypeChangeCipherSpec:
+				ccsCount++
+				// CCS payload должен быть [0x01]
+				suite.Equal([]byte{0x01}, rec.Payload.Bytes())
+			default:
+				suite.FailNow("unexpected record type: %v", rec.Type)
+			}
+		}
+
+		// Данные не повреждены
+		suite.Equal(data, reconstructed.Bytes())
+	}
+
+	// При 15% вероятности, 100 итераций — ожидаем хотя бы 1 CCS
+	suite.Greater(ccsCount, 0, "CCS padding should inject at least 1 CCS record in 100 iterations")
+}
+
 func TestConn(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &ConnTestSuite{})

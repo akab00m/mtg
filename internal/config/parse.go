@@ -53,6 +53,9 @@ type tomlConfig struct {
 		MaxIdleConns uint   `toml:"max-idle-conns" json:"maxIdleConns,omitempty"`
 		IdleTimeout  string `toml:"idle-timeout" json:"idleTimeout,omitempty"`
 	} `toml:"connection-pool" json:"connectionPool,omitempty"`
+	AntiFingerprint struct {
+		CCSPadding bool `toml:"ccs-padding" json:"ccsPadding,omitempty"`
+	} `toml:"anti-fingerprint" json:"antiFingerprint,omitempty"`
 	Stats struct {
 		StatsD struct {
 			Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`

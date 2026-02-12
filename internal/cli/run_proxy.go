@@ -281,6 +281,9 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		// Rate Limit settings
 		RateLimitPerSecond: float64(conf.RateLimit.PerSecond.Get(0)),
 		RateLimitBurst:     int(conf.RateLimit.Burst.Get(20)),
+
+		// Anti-fingerprint settings
+		EnableCCSPadding: conf.AntiFingerprint.CCSPadding.Get(false),
 	}
 
 	proxy, err := mtglib.NewProxy(opts)
