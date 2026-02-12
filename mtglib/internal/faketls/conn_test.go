@@ -185,6 +185,7 @@ func (suite *ConnTestSuite) TestWriteChromeLikeRecordSizes() {
 
 // TestWriteWithCCSPadding проверяет, что CCS padding не повреждает данные.
 // CCS records должны игнорироваться при reconstruction данных.
+// Данные > 16384 байт (несколько records), т.к. CCS inject требует totalRecords > 1.
 func (suite *ConnTestSuite) TestWriteWithCCSPadding() {
 	suite.c.EnableCCSPadding = true
 	suite.connMock.On("Write", mock.Anything).Return(0, nil)
@@ -196,15 +197,18 @@ func (suite *ConnTestSuite) TestWriteWithCCSPadding() {
 
 	ccsCount := 0
 
+	// Размер данных > 16384 — нужно минимум 2 records для CCS inject
+	dataSize := record.TLSMaxWriteRecordSize*2 + 100
+
 	for i := 0; i < 100; i++ {
 		suite.connMock.writeBuffer.Reset()
 
-		data := make([]byte, 1024)
+		data := make([]byte, dataSize)
 		rand.Read(data)
 
 		n, err := suite.c.Write(data)
 		suite.NoError(err)
-		suite.Equal(1024, n)
+		suite.Equal(dataSize, n)
 
 		// Reconstruction: собираем ApplicationData, считаем CCS
 		reconstructed := &bytes.Buffer{}

@@ -62,6 +62,18 @@ func (c *Conn) Write(p []byte) (int, error) {
 
 	lenP := len(p)
 
+	// Подсчёт records для CCS injection в рандомную позицию.
+	// CCS между ApplicationData records реалистичнее чем после всех —
+	// имитирует TLS 1.3 compatibility mode (RFC 8446 Appendix D.4).
+	totalRecords := (lenP + record.TLSMaxWriteRecordSize - 1) / record.TLSMaxWriteRecordSize
+	ccsAfterRecord := -1 // -1 = нет CCS
+
+	if c.EnableCCSPadding && totalRecords > 1 && secureRandIntn(100) < ccsPaddingProbabilityPercent {
+		ccsAfterRecord = secureRandIntn(totalRecords - 1) // inject после record [0..N-2]
+	}
+
+	recordIdx := 0
+
 	for len(p) > 0 {
 		// Chrome/Firefox TLS 1.3 профиль: полные 16384-байтные records.
 		// Реальные TLS-стеки всегда заполняют records до максимума при bulk transfer.
@@ -80,13 +92,16 @@ func (c *Conn) Write(p []byte) (int, error) {
 		rec.Dump(sendBuffer) //nolint: errcheck
 
 		p = p[chunkSize:]
-	}
 
-	// CCS cover traffic: инъекция dummy ChangeCipherSpec record.
-	// Эффект: ломает DPI-анализ по подсчёту records в burst и timing.
-	// Клиентский Read() игнорирует CCS records (case TypeChangeCipherSpec: пустой).
-	if c.EnableCCSPadding && secureRandIntn(100) < ccsPaddingProbabilityPercent {
-		c.injectDummyCCS(sendBuffer) //nolint: errcheck
+		// CCS cover traffic: инъекция dummy ChangeCipherSpec record
+		// между ApplicationData records (не после всех).
+		// Ломает DPI-анализ по подсчёту records в burst и timing.
+		// Клиентский Read() игнорирует CCS records (case TypeChangeCipherSpec: пустой).
+		if recordIdx == ccsAfterRecord {
+			c.injectDummyCCS(sendBuffer)
+		}
+
+		recordIdx++
 	}
 
 	if _, err := c.Conn.Write(sendBuffer.Bytes()); err != nil {
