@@ -38,27 +38,19 @@ const (
 	// probes.
 	DefaultTCPKeepAlivePeriod = 10 * time.Second
 
-	// ProxyDialerOpenThreshold is used for load balancing SOCKS5 dialer only.
+	// ProxyDialerOpenThreshold — порог ошибок для SOCKS5 load balancing.
 	//
-	// This dialer uses circuit breaker with of 3 stages: OPEN, HALF_OPEN and
-	// CLOSED. If state is CLOSED, all requests go in a normal mode. If you get
-	// more that ProxyDialerOpenThreshold errors, circuit breaker goes into OPEN
-	// mode.
+	// Используется cooldown dialer: после ProxyDialerOpenThreshold
+	// последовательных ошибок прокси ставится на "остывание" на
+	// ProxyDialerReconnectTimeout. По истечении таймаута прокси снова доступен.
 	//
-	// When circuit breaker is in OPEN mode, it forbids all request to a given
-	// proxy. But after ProxyDialerHalfOpenTimeout it gives a second chance and
-	// opens an access for a SINGLE request. If this request success, then circuit
-	// breaker closes, otherwise opens again.
-	//
-	// When circuit breaker is closed, it clears an error states each
-	// ProxyDialerResetFailuresTimeout.
+	// Аналог reconnect_timeout из оригинального MTProxy.
 	ProxyDialerOpenThreshold = 5
 
-	// ProxyDialerHalfOpenTimeout defines a halfopen timeout for circuit breaker.
-	ProxyDialerHalfOpenTimeout = time.Minute
-
-	// ProxyDialerResetFailuresTimeout defines a timeout for resetting a failure.
-	ProxyDialerResetFailuresTimeout = 10 * time.Second
+	// ProxyDialerReconnectTimeout — время "остывания" прокси после
+	// ProxyDialerOpenThreshold ошибок. Совпадает с reconnect_timeout
+	// из оригинального MTProxy (17 секунд).
+	ProxyDialerReconnectTimeout = 17 * time.Second
 
 	// DefaultDOHHostname defines a default IP address for DOH host. Since mtg is
 	// simple, please pass IP address here. We do not have bootstrap servers here
@@ -74,9 +66,9 @@ const (
 )
 
 var (
-	// ErrCircuitBreakerOpened is returned when proxy is being accessed but
-	// circuit breaker is opened.
-	ErrCircuitBreakerOpened = errors.New("circuit breaker is opened")
+	// ErrCircuitBreakerOpened возвращается, когда прокси находится
+	// на "остывании" (cooldown) после серии неудачных подключений.
+	ErrCircuitBreakerOpened = errors.New("proxy is on cooldown")
 
 	// ErrCannotDialWithAllProxies is returned when load balancing client is
 	// trying to access proxies but all of them are failed.

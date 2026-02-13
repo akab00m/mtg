@@ -46,6 +46,13 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	setTCPNoDelay(telegramConn)
 	setTCPNoDelay(clientConn)
 
+	// TCP_WINDOW_CLAMP: ограничение receive window для соединения к Telegram.
+	// 128KB (131072) — значение из оригинального MTProxy (DEFAULT_WINDOW_CLAMP).
+	// Предотвращает buffer bloat: без clamp TCP window растёт неограниченно,
+	// и Telegram может отправить больше данных, чем proxy успевает relay.
+	// Применяется ТОЛЬКО к telegramConn — клиентское соединение не ограничиваем.
+	setTCPWindowClamp(telegramConn, 131072) //nolint: gomnd
+
 	// TCP_USER_TIMEOUT: закрыть соединение если нет ACK 30 секунд.
 	// Без этого мёртвые соединения висят до TCP retransmit timeout (~15 мин),
 	// расходуя file descriptors и goroutine worker slots.

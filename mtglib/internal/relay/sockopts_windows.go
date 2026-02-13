@@ -60,4 +60,9 @@ func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
 	// Not supported on Windows
 }
 
+// setTCPWindowClamp не поддерживается на Windows.
+func setTCPWindowClamp(conn net.Conn, clampBytes int) {
+	// Not supported on Windows
+}
+
 

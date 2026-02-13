@@ -3,7 +3,6 @@
 package relay
 
 import (
-	"log"
 	"net"
 
 	"golang.org/x/sys/unix"
@@ -21,7 +20,11 @@ const (
 	// Соединение закрывается если нет ACK в течение указанного времени.
 	// Доступен с kernel 2.6.37.
 	TCP_USER_TIMEOUT = 18
-)
+	// TCP_WINDOW_CLAMP — ограничивает размер TCP receive window.
+	// Предотвращает рост буферов на стороне Telegram (buffer bloat).
+	// Оригинал MTProxy использует DEFAULT_WINDOW_CLAMP = 131072 (128KB).
+	// Доступен с kernel 2.4.
+	TCP_WINDOW_CLAMP = 10)
 
 // setTCPQuickACK включает TCP_QUICKACK для немедленной отправки ACK.
 func setTCPQuickACK(conn net.Conn) {
@@ -32,14 +35,11 @@ func setTCPQuickACK(conn net.Conn) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
-		log.Printf("[relay] TCP_QUICKACK: SyscallConn failed: %v", err)
 		return
 	}
 
 	_ = rawConn.Control(func(fd uintptr) {
-		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1); err != nil { //nolint: nosnakecase
-			log.Printf("[relay] TCP_QUICKACK: setsockopt failed: %v", err)
-		}
+		unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1) //nolint: errcheck,nosnakecase
 	})
 }
 
@@ -51,9 +51,7 @@ func setTCPNoDelay(conn net.Conn) {
 		return
 	}
 
-	if err := tcpConn.SetNoDelay(true); err != nil {
-		log.Printf("[relay] TCP_NODELAY: SetNoDelay failed: %v", err)
-	}
+	tcpConn.SetNoDelay(true) //nolint: errcheck
 }
 
 // setTCPNotSentLowat устанавливает TCP_NOTSENT_LOWAT для снижения latency.
@@ -66,14 +64,11 @@ func setTCPNotSentLowat(conn net.Conn, threshold int) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
-		log.Printf("[relay] TCP_NOTSENT_LOWAT: SyscallConn failed: %v", err)
 		return
 	}
 
 	_ = rawConn.Control(func(fd uintptr) {
-		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_NOTSENT_LOWAT, threshold); err != nil {
-			log.Printf("[relay] TCP_NOTSENT_LOWAT(%d): setsockopt failed: %v", threshold, err)
-		}
+		unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_NOTSENT_LOWAT, threshold) //nolint: errcheck
 	})
 }
 
@@ -87,15 +82,29 @@ func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
-		log.Printf("[relay] TCP_USER_TIMEOUT: SyscallConn failed: %v", err)
 		return
 	}
 
 	_ = rawConn.Control(func(fd uintptr) {
-		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_USER_TIMEOUT, timeoutMs); err != nil {
-			log.Printf("[relay] TCP_USER_TIMEOUT(%dms): setsockopt failed: %v", timeoutMs, err)
-		}
+		unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_USER_TIMEOUT, timeoutMs) //nolint: errcheck
 	})
 }
+// setTCPWindowClamp устанавливает TCP_WINDOW_CLAMP для ограничения receive window.
+// Предотвращает buffer bloat на стороне Telegram DC.
+// Оригинал MTProxy: DEFAULT_WINDOW_CLAMP = 131072 (128KB).
+func setTCPWindowClamp(conn net.Conn, clampBytes int) {
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
 
+	rawConn, err := tcpConn.SyscallConn()
+	if err != nil {
+		return
+	}
+
+	_ = rawConn.Control(func(fd uintptr) {
+		unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_WINDOW_CLAMP, clampBytes) //nolint: errcheck
+	})
+}
 

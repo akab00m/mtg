@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"runtime"
+	"sync/atomic"
 
 	"github.com/9seconds/mtg/v2/mtglib"
 	"github.com/OneOfOne/xxhash"
@@ -22,10 +23,16 @@ type EventStream struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 	chans     []chan mtglib.Event
+
+	// dropped считает количество потерянных событий при overflow.
+	// Указатель — EventStream использует value receiver, atomic.Uint64 содержит noCopy.
+	dropped *atomic.Uint64
 }
 
-// Send starts delivering of the message to observer with respect to a
-// given context If context is closed, message could be not delivered.
+// Send delivers event to observer non-blocking.
+// При переполнении канала EventTraffic события отбрасываются (drop-on-overflow)
+// для предотвращения блокировки relay goroutine.
+// Важные события (Start, Finish, Connect, Security) всегда доставляются блокирующе.
 func (e EventStream) Send(ctx context.Context, evt mtglib.Event) {
 	var chanNo uint32
 
@@ -35,11 +42,40 @@ func (e EventStream) Send(ctx context.Context, evt mtglib.Event) {
 		chanNo = rand.Uint32()
 	}
 
+	ch := e.chans[int(chanNo)%len(e.chans)]
+
+	// EventTraffic — высокочастотное событие (каждый Read/Write в relay).
+	// При slow Prometheus consumer (GC pause, disk IO) буфер 64 заполняется
+	// за ~2 секунды, после чего relay goroutine блокируется на Send().
+	// Это замедляет передачу данных клиенту — недопустимо для proxy.
+	//
+	// Остальные события (Start, Finish, ConnectedToDC, ReplayAttack и т.д.)
+	// редкие и критичные для Prometheus метрик — для них блокировка допустима.
+	if _, isTraffic := evt.(mtglib.EventTraffic); isTraffic {
+		select {
+		case <-ctx.Done():
+		case <-e.ctx.Done():
+		case ch <- evt:
+		default:
+			// Буфер переполнен — отбрасываем traffic event.
+			// Метрики traffic будут чуть менее точными, но relay не блокируется.
+			e.dropped.Add(1)
+		}
+
+		return
+	}
+
+	// Для некритичного пути (Start, Finish и т.д.) — блокирующая доставка.
 	select {
 	case <-ctx.Done():
 	case <-e.ctx.Done():
-	case e.chans[int(chanNo)%len(e.chans)] <- evt:
+	case ch <- evt:
 	}
+}
+
+// Dropped возвращает количество отброшенных событий с момента старта.
+func (e EventStream) Dropped() uint64 {
+	return e.dropped.Load()
 }
 
 // Shutdown stops an event stream pipeline.
@@ -62,6 +98,7 @@ func NewEventStream(observerFactories []ObserverFactory) EventStream {
 		ctx:       ctx,
 		ctxCancel: cancel,
 		chans:     make([]chan mtglib.Event, runtime.NumCPU()),
+		dropped:   &atomic.Uint64{},
 	}
 
 	for i := 0; i < runtime.NumCPU(); i++ {

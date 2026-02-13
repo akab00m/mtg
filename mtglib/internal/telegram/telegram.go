@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/9seconds/mtg/v2/essentials"
 )
@@ -11,9 +13,18 @@ import (
 type Telegram struct {
 	dialer      Dialer
 	preferIP    preferIP
-	pool        addressPool
+
+	// DC address pool с thread-safe доступом.
+	// RWMutex: reads (каждый Dial) — RLock, writes (refresh раз в 24ч) — Lock.
+	poolMu       sync.RWMutex
+	pool         addressPool
+	fallbackPool addressPool // hardcoded адреса, никогда не меняются
+
 	connPool    *ConnectionPoolManager // Connection pool для переиспользования соединений
 	useConnPool bool                   // Включен ли connection pooling
+
+	// DC auto-refresh
+	refresher *dcRefresher
 }
 
 // Dial создаёт или переиспользует соединение к DC.
@@ -49,18 +60,23 @@ func (t *Telegram) DialDirect(ctx context.Context, dc int) (essentials.Conn, err
 }
 
 // getAddresses возвращает адреса для DC согласно IP preference.
+// Thread-safe: защищён RWMutex для совместимости с DC auto-refresh.
 func (t *Telegram) getAddresses(dc int) []tgAddr {
+	t.poolMu.RLock()
+	pool := t.pool
+	t.poolMu.RUnlock()
+
 	switch t.preferIP {
 	case preferIPOnlyIPv4:
-		return t.pool.getV4(dc)
+		return pool.getV4(dc)
 	case preferIPOnlyIPv6:
-		return t.pool.getV6(dc)
+		return pool.getV6(dc)
 	case preferIPPreferIPv4:
-		return append(t.pool.getV4(dc), t.pool.getV6(dc)...)
+		return append(pool.getV4(dc), pool.getV6(dc)...)
 	case preferIPPreferIPv6:
-		return append(t.pool.getV6(dc), t.pool.getV4(dc)...)
+		return append(pool.getV6(dc), pool.getV4(dc)...)
 	default:
-		return t.pool.getV4(dc)
+		return pool.getV4(dc)
 	}
 }
 
@@ -80,7 +96,11 @@ func (t *Telegram) dialDirect(ctx context.Context, addresses []tgAddr, dc int) (
 }
 
 func (t *Telegram) IsKnownDC(dc int) bool {
-	return t.pool.isValidDC(dc)
+	t.poolMu.RLock()
+	valid := t.pool.isValidDC(dc)
+	t.poolMu.RUnlock()
+
+	return valid
 }
 
 func (t *Telegram) GetFallbackDC() int {
@@ -93,11 +113,71 @@ func (t *Telegram) GetFallbackDCExcluding(exclude int) int {
 	return t.pool.getRandomDCExcluding(exclude)
 }
 
-// Close закрывает все пулы соединений.
+// updatePool атомарно обновляет пул DC-адресов.
+func (t *Telegram) updatePool(newPool addressPool) {
+	t.poolMu.Lock()
+	t.pool = newPool
+	t.poolMu.Unlock()
+}
+
+// startDCRefresh запускает фоновое обновление DC-адресов из файла.
+// При ошибке загрузки используются hardcoded адреса (fallbackPool).
+func (t *Telegram) startDCRefresh() {
+	if t.refresher == nil {
+		return
+	}
+
+	// Начальная загрузка
+	if newPool, err := loadDCConfig(t.refresher.filePath); err == nil {
+		t.updatePool(*newPool)
+	}
+	// При ошибке остаётся fallbackPool (hardcoded)
+
+	go t.refreshLoop()
+}
+
+// refreshLoop периодически обновляет DC-адреса из файла.
+func (t *Telegram) refreshLoop() {
+	ticker := newSafeRefreshTicker(t.refresher.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-t.refresher.stopCh:
+			return
+		case <-ticker.C:
+			newPool, err := loadDCConfig(t.refresher.filePath)
+			if err != nil {
+				// Ошибка загрузки — откатываемся на hardcoded
+				t.updatePool(t.refresher.fallbackPool)
+
+				continue
+			}
+
+			t.updatePool(*newPool)
+		}
+	}
+}
+
+// newSafeRefreshTicker создаёт тикер с минимальным интервалом 1 минута.
+func newSafeRefreshTicker(interval time.Duration) *time.Ticker {
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+
+	return time.NewTicker(interval)
+}
+
+// Close закрывает все пулы соединений и останавливает DC refresh.
 func (t *Telegram) Close() error {
+	if t.refresher != nil {
+		t.refresher.stop()
+	}
+
 	if t.connPool != nil {
 		return t.connPool.Close()
 	}
+
 	return nil
 }
 
@@ -118,6 +198,14 @@ func WithConnectionPool(config PoolConfig) TelegramOption {
 	return func(t *Telegram) {
 		t.connPool = NewConnectionPoolManager(t.dialer, config)
 		t.useConnPool = true
+	}
+}
+
+// WithDCConfigFile включает авто-обновление DC-адресов из JSON файла.
+// Fallback на hardcoded адреса при ошибке загрузки.
+func WithDCConfigFile(filePath string, refreshInterval time.Duration) TelegramOption {
+	return func(t *Telegram) {
+		t.refresher = newDCRefresher(filePath, refreshInterval, t.fallbackPool)
 	}
 }
 
@@ -155,16 +243,20 @@ func New(dialer Dialer, ipPreference string, useTestDCs bool, opts ...TelegramOp
 	}
 
 	tg := &Telegram{
-		dialer:      dialer,
-		preferIP:    pref,
-		pool:        pool,
-		useConnPool: false, // По умолчанию выключен
+		dialer:       dialer,
+		preferIP:     pref,
+		pool:         pool,
+		fallbackPool: pool, // hardcoded копия — никогда не меняется
+		useConnPool:  false, // По умолчанию выключен
 	}
 
 	// Применяем опции
 	for _, opt := range opts {
 		opt(tg)
 	}
+
+	// Запуск DC auto-refresh (если сконфигурирован)
+	tg.startDCRefresh()
 
 	return tg, nil
 }

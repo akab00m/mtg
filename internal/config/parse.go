@@ -53,6 +53,13 @@ type tomlConfig struct {
 		MaxIdleConns uint   `toml:"max-idle-conns" json:"maxIdleConns,omitempty"`
 		IdleTimeout  string `toml:"idle-timeout" json:"idleTimeout,omitempty"`
 	} `toml:"connection-pool" json:"connectionPool,omitempty"`
+	DCConfig struct {
+		Enabled         bool   `toml:"enabled" json:"enabled,omitempty"`
+		File            string `toml:"file" json:"file,omitempty"`
+		RefreshInterval string `toml:"refresh-interval" json:"refreshInterval,omitempty"`
+	} `toml:"dc-config" json:"dcConfig,omitempty"`
+	// AntiFingerprint — DEPRECATED: CCS padding удалён.
+	// Секция сохранена для совместимости со старыми конфигами.
 	AntiFingerprint struct {
 		CCSPadding bool `toml:"ccs-padding" json:"ccsPadding,omitempty"`
 	} `toml:"anti-fingerprint" json:"antiFingerprint,omitempty"`

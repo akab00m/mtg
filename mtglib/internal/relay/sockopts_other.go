@@ -21,3 +21,5 @@ func setTCPNoDelay(conn net.Conn) {
 func setTCPNotSentLowat(conn net.Conn, threshold int) {}
 
 func setTCPUserTimeout(conn net.Conn, timeoutMs int) {}
+
+func setTCPWindowClamp(conn net.Conn, clampBytes int) {}

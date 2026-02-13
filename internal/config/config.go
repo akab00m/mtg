@@ -81,12 +81,24 @@ type Config struct {
 		// Default: 20
 		Burst TypeConcurrency `json:"burst"`
 	} `json:"rateLimit"`
+	// DCConfig — настройки авто-обновления DC-адресов Telegram.
+	// По умолчанию используются hardcoded адреса из исходного кода.
+	// JSON файл позволяет обновлять адреса без пересборки образа.
+	DCConfig struct {
+		Optional
+
+		// File — путь к JSON файлу с DC-адресами.
+		File string `json:"file"`
+
+		// RefreshInterval — интервал проверки файла на обновления.
+		// Default: 24h
+		RefreshInterval TypeDuration `json:"refreshInterval"`
+	} `json:"dcConfig"`
 	// AntiFingerprint — настройки противодействия DPI-анализу.
+	// DEPRECATED: CCS padding удалён — RFC 8446 violation.
+	// Секция сохранена для backward compatibility при парсинге старых конфигов.
 	AntiFingerprint struct {
-		// CCSPadding включает инъекцию dummy ChangeCipherSpec records
-		// между ApplicationData records (~15% вероятность).
-		// Эффект: затрудняет traffic analysis по подсчёту records и timing.
-		// Default: false
+		// CCSPadding — DEPRECATED, игнорируется. CCS между ApplicationData = DPI fingerprint.
 		CCSPadding TypeBool `json:"ccsPadding"`
 	} `json:"antiFingerprint"`
 	Stats struct {

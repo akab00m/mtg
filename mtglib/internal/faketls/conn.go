@@ -8,21 +8,23 @@ import (
 	"github.com/9seconds/mtg/v2/mtglib/internal/faketls/record"
 )
 
-// ccsPaddingProbabilityPercent — вероятность инъекции dummy CCS record
-// после блока ApplicationData records. CCS records невидимы для клиента
-// (Read() молча их игнорирует), но ломают DPI-анализ по подсчёту records,
-// размеру burst и межпакетным интервалам.
-const ccsPaddingProbabilityPercent = 15
+// A5: CCS padding удалён — RFC 8446 Appendix D.4 допускает CCS ТОЛЬКО перед
+// ServerHello (compatibility mode), но НЕ между ApplicationData records.
+// CCS в data stream = аномалия → DPI (GFW, Roskomnadzor) может детектировать proxy.
+//
+// Исследование (GFW Report, USENIX Security 2023): "Любое изменение traffic
+// pattern создаёт новый fingerprint." TLS Record Layer padding (RFC 8449)
+// также контрпродуктивен — реальные TLS-стеки его не используют в data phase.
+//
+// Текущая anti-fingerprint стратегия:
+// - Chrome-like TLS record sizes (полные 16384-байтные records)
+// - Стандартное TLS 1.3 поведение без модификаций
+// - "looks like nothing" ≠ safe, но "looks like Chrome" = safe
 
 type Conn struct {
 	essentials.Conn
 
 	readBuffer bytes.Buffer
-
-	// EnableCCSPadding включает инъекцию dummy ChangeCipherSpec records.
-	// Эффект: затрудняет traffic analysis (подсчёт records в burst).
-	// Клиентская сторона (Read) уже игнорирует CCS records.
-	EnableCCSPadding bool
 }
 
 func (c *Conn) Read(p []byte) (int, error) {
@@ -44,6 +46,8 @@ func (c *Conn) Read(p []byte) (int, error) {
 
 			return c.readBuffer.Read(p) //nolint: wrapcheck
 		case record.TypeChangeCipherSpec:
+			// Backward compatibility: игнорируем CCS если клиент или
+			// предыдущая версия сервера отправляет их.
 		default:
 			return 0, fmt.Errorf("unsupported record type %v", rec.Type)
 		}
@@ -61,18 +65,6 @@ func (c *Conn) Write(p []byte) (int, error) {
 	defer releaseBytesBuffer(sendBuffer)
 
 	lenP := len(p)
-
-	// Подсчёт records для CCS injection в рандомную позицию.
-	// CCS между ApplicationData records реалистичнее чем после всех —
-	// имитирует TLS 1.3 compatibility mode (RFC 8446 Appendix D.4).
-	totalRecords := (lenP + record.TLSMaxWriteRecordSize - 1) / record.TLSMaxWriteRecordSize
-	ccsAfterRecord := -1 // -1 = нет CCS
-
-	if c.EnableCCSPadding && totalRecords > 1 && secureRandIntn(100) < ccsPaddingProbabilityPercent {
-		ccsAfterRecord = secureRandIntn(totalRecords - 1) // inject после record [0..N-2]
-	}
-
-	recordIdx := 0
 
 	for len(p) > 0 {
 		// Chrome/Firefox TLS 1.3 профиль: полные 16384-байтные records.
@@ -92,16 +84,6 @@ func (c *Conn) Write(p []byte) (int, error) {
 		rec.Dump(sendBuffer) //nolint: errcheck
 
 		p = p[chunkSize:]
-
-		// CCS cover traffic: инъекция dummy ChangeCipherSpec record
-		// между ApplicationData records (не после всех).
-		// Ломает DPI-анализ по подсчёту records в burst и timing.
-		// Клиентский Read() игнорирует CCS records (case TypeChangeCipherSpec: пустой).
-		if recordIdx == ccsAfterRecord {
-			c.injectDummyCCS(sendBuffer)
-		}
-
-		recordIdx++
 	}
 
 	if _, err := c.Conn.Write(sendBuffer.Bytes()); err != nil {
@@ -109,17 +91,4 @@ func (c *Conn) Write(p []byte) (int, error) {
 	}
 
 	return lenP, nil
-}
-
-// injectDummyCCS записывает dummy ChangeCipherSpec record в буфер.
-// CCS record с payload [0x01] — стандартная часть TLS handshake flow,
-// его присутствие после handshake не является аномалией для DPI.
-func (c *Conn) injectDummyCCS(buf *bytes.Buffer) {
-	rec := record.AcquireRecord()
-	defer record.ReleaseRecord(rec)
-
-	rec.Type = record.TypeChangeCipherSpec
-	rec.Version = record.Version12
-	rec.Payload.WriteByte(0x01) // ChangeCipherSpec value
-	rec.Dump(buf) //nolint: errcheck
 }

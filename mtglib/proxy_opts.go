@@ -140,6 +140,17 @@ type ProxyOpts struct {
 	// This is an optional setting. Default: 20
 	RateLimitBurst int
 
+	// DCConfigFile — путь к JSON файлу с DC-адресами.
+	// Если указан, адреса периодически перезагружаются из файла.
+	// При ошибке загрузки используются hardcoded адреса.
+	//
+	// This is an optional setting.
+	DCConfigFile string
+
+	// DCRefreshInterval — интервал проверки DC-файла на обновления.
+	// Default: 24h
+	DCRefreshInterval time.Duration
+
 	// EnableConnectionPool включает пул соединений к Telegram DC.
 	// Переиспользование соединений снижает latency на 30-50ms.
 	//
@@ -156,11 +167,8 @@ type ProxyOpts struct {
 	// This is an optional setting. Default: 1 minute
 	ConnectionPoolIdleTimeout time.Duration
 
-	// EnableCCSPadding включает инъекцию dummy CCS records в FakeTLS поток.
-	// Затрудняет DPI-анализ по подсчёту TLS records и timing.
-	//
-	// This is an optional setting. Default: false
-	EnableCCSPadding bool
+	// A5: CCS padding удалён — RFC 8446 violation, создаёт DPI fingerprint.
+	// См. комментарий в mtglib/internal/faketls/conn.go.
 }
 
 func (p ProxyOpts) valid() error {

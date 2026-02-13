@@ -257,12 +257,41 @@ idle-timeout = "20s"
 # Chrome-like TLS record sizes are always active (no config needed):
 #   Full 16384-byte records for bulk transfer, remainder for last record.
 #   Matches real Chrome/Firefox TLS 1.3, unlike uniform random sizing.
+#
+# REMOVED: CCS padding (ccs-padding) was removed because injecting
+# ChangeCipherSpec records between ApplicationData violates RFC 8446
+# Appendix D.4 and creates a detectable DPI fingerprint.
+# This section is kept for backward compatibility only.
 [anti-fingerprint]
-# CCS padding: inject dummy ChangeCipherSpec records (~15% probability).
-# Effect: disrupts DPI traffic analysis based on TLS record counting.
-# Client Read() silently ignores CCS records (standard TLS behavior).
-# Overhead: ~6 bytes per CCS record (5 header + 1 payload), negligible.
-ccs-padding = false
+# DEPRECATED: This option is ignored. CCS padding has been removed.
+# ccs-padding = false
+
+# DC Config — optional auto-refresh of Telegram DC addresses.
+# By default, DC addresses are hardcoded in the binary (from Telegram Desktop).
+# This section allows loading addresses from a JSON file, which can be
+# updated externally without rebuilding the image.
+#
+# JSON format:
+#   {
+#     "v4": {
+#       "1": ["149.154.175.50:443"],
+#       "2": ["149.154.167.51:443", "95.161.76.100:443"],
+#       ...
+#     },
+#     "v6": {
+#       "1": ["[2001:b28:f23d:f001::a]:443"],
+#       ...
+#     }
+#   }
+#
+# On load error, fallback to hardcoded addresses.
+[dc-config]
+# Enable DC config loading from file.
+enabled = false
+# Path to JSON file with DC addresses.
+# file = "/config/dc_addresses.json"
+# How often to re-read the file. Default: 24h.
+# refresh-interval = "24h"
 
 # statsd statistics integration.
 [stats.statsd]

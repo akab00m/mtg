@@ -10,9 +10,8 @@ func newProxyDialer(baseDialer Dialer, proxyURL *url.URL) Dialer {
 	params := proxyURL.Query()
 
 	var (
-		openThreshold        uint32 = ProxyDialerOpenThreshold
-		halfOpenTimeout             = ProxyDialerHalfOpenTimeout
-		resetFailuresTimeout        = ProxyDialerResetFailuresTimeout
+		openThreshold    uint32 = ProxyDialerOpenThreshold
+		reconnectTimeout        = ProxyDialerReconnectTimeout
 	)
 
 	if param := params.Get("open_threshold"); param != "" {
@@ -21,17 +20,17 @@ func newProxyDialer(baseDialer Dialer, proxyURL *url.URL) Dialer {
 		}
 	}
 
-	if param := params.Get("half_open_timeout"); param != "" {
+	// Основной параметр — reconnect_timeout. Для обратной совместимости
+	// также принимаем устаревший half_open_timeout.
+	if param := params.Get("reconnect_timeout"); param != "" {
 		if dur, err := time.ParseDuration(param); err == nil && dur > 0 {
-			halfOpenTimeout = dur
+			reconnectTimeout = dur
+		}
+	} else if param := params.Get("half_open_timeout"); param != "" {
+		if dur, err := time.ParseDuration(param); err == nil && dur > 0 {
+			reconnectTimeout = dur
 		}
 	}
 
-	if param := params.Get("reset_failures_timeout"); param != "" {
-		if dur, err := time.ParseDuration(param); err == nil && dur > 0 {
-			resetFailuresTimeout = dur
-		}
-	}
-
-	return newCircuitBreakerDialer(baseDialer, openThreshold, halfOpenTimeout, resetFailuresTimeout)
+	return newCooldownDialer(baseDialer, openThreshold, reconnectTimeout)
 }

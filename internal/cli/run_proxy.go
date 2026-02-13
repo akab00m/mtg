@@ -213,6 +213,16 @@ func makeEventStream(conf *config.Config, logger mtglib.Logger, version string) 
 	return events.NewNoopStream(), nil
 }
 
+// getDCConfigFile возвращает путь к файлу DC-адресов,
+// если dc-config секция включена и файл указан.
+func getDCConfigFile(conf *config.Config) string {
+	if conf.DCConfig.Enabled.Get(false) && conf.DCConfig.File != "" {
+		return conf.DCConfig.File
+	}
+
+	return ""
+}
+
 func runProxy(conf *config.Config, version string) error { //nolint: funlen
 	logger := makeLogger(conf)
 
@@ -278,12 +288,15 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		ConnectionPoolMaxIdle:     int(conf.ConnectionPool.MaxIdleConns.Get(5)),
 		ConnectionPoolIdleTimeout: conf.ConnectionPool.IdleTimeout.Value,
 
+		// DC Config: авто-обновление адресов из файла
+		DCConfigFile:      getDCConfigFile(conf),
+		DCRefreshInterval: conf.DCConfig.RefreshInterval.Value,
+
 		// Rate Limit settings
 		RateLimitPerSecond: float64(conf.RateLimit.PerSecond.Get(0)),
 		RateLimitBurst:     int(conf.RateLimit.Burst.Get(20)),
 
-		// Anti-fingerprint settings
-		EnableCCSPadding: conf.AntiFingerprint.CCSPadding.Get(false),
+		// A5: CCS padding удалён — RFC 8446 violation, создаёт DPI fingerprint.
 	}
 
 	proxy, err := mtglib.NewProxy(opts)

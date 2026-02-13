@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-type CircuitBreakerTestSuite struct {
+type CooldownDialerTestSuite struct {
 	suite.Suite
 
 	d              Dialer
@@ -25,22 +25,22 @@ type CircuitBreakerTestSuite struct {
 	baseDialerMock *DialerMock
 }
 
-func (suite *CircuitBreakerTestSuite) SetupTest() {
+func (suite *CooldownDialerTestSuite) SetupTest() {
 	suite.mutex = sync.Mutex{}
 	suite.ctx, suite.ctxCancel = context.WithCancel(context.Background())
 	suite.baseDialerMock = &DialerMock{}
 	suite.connMock = &testlib.EssentialsConnMock{}
-	suite.d = newCircuitBreakerDialer(suite.baseDialerMock,
-		3, 100*time.Millisecond, 50*time.Millisecond)
+	suite.d = newCooldownDialer(suite.baseDialerMock,
+		3, 100*time.Millisecond)
 }
 
-func (suite *CircuitBreakerTestSuite) TearDownTest() {
+func (suite *CooldownDialerTestSuite) TearDownTest() {
 	suite.ctxCancel()
 	suite.baseDialerMock.AssertExpectations(suite.T())
 	suite.connMock.AssertExpectations(suite.T())
 }
 
-func (suite *CircuitBreakerTestSuite) TestMultipleRunsOk() {
+func (suite *CooldownDialerTestSuite) TestMultipleRunsOk() {
 	suite.connMock.On("RemoteAddr").
 		Times(5).
 		Return(&net.TCPAddr{
@@ -80,7 +80,7 @@ func (suite *CircuitBreakerTestSuite) TestMultipleRunsOk() {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func (suite *CircuitBreakerTestSuite) TestFromClosedToOpen() {
+func (suite *CooldownDialerTestSuite) TestFromAvailableToCooldown() {
 	suite.baseDialerMock.On("DialContext", mock.Anything, "tcp", "127.0.0.1").
 		Times(3).
 		Return(&net.TCPConn{}, io.EOF)
@@ -94,13 +94,15 @@ func (suite *CircuitBreakerTestSuite) TestFromClosedToOpen() {
 	_, err = suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1")
 	suite.True(errors.Is(err, io.EOF))
 
+	// После threshold ошибок — прокси на cooldown
 	_, err = suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1")
 	suite.True(errors.Is(err, ErrCircuitBreakerOpened))
 }
 
-func (suite *CircuitBreakerTestSuite) TestHalfOpen() {
+func (suite *CooldownDialerTestSuite) TestCooldownRecovery() {
+	// 3 ошибки → cooldown
 	suite.baseDialerMock.On("DialContext", mock.Anything, "tcp", "127.0.0.1").
-		Times(4).
+		Times(3).
 		Return(&net.TCPConn{}, io.EOF)
 	suite.baseDialerMock.On("DialContext", mock.Anything, "tcp", "127.0.0.2").
 		Twice().
@@ -113,27 +115,26 @@ func (suite *CircuitBreakerTestSuite) TestHalfOpen() {
 	suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1") //nolint: errcheck
 	suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1") //nolint: errcheck
 	suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1") //nolint: errcheck
-	suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1") //nolint: errcheck
 
-	time.Sleep(500 * time.Millisecond)
-
+	// Сразу — cooldown
 	_, err := suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1")
-	suite.True(errors.Is(err, io.EOF))
-
-	_, err = suite.d.DialContext(suite.ctx, "tcp", "127.0.0.1")
 	suite.True(errors.Is(err, ErrCircuitBreakerOpened))
 
-	time.Sleep(500 * time.Millisecond)
+	// Ждём окончания cooldown (100ms)
+	time.Sleep(200 * time.Millisecond)
 
+	// После cooldown — прокси снова доступен
 	conn, err := suite.d.DialContext(suite.ctx, "tcp", "127.0.0.2")
 	suite.NoError(err)
 	suite.Equal("10.0.0.10:80", conn.RemoteAddr().String())
 
-	_, err = suite.d.DialContext(suite.ctx, "tcp", "127.0.0.2")
+	// Повторный успешный вызов
+	conn, err = suite.d.DialContext(suite.ctx, "tcp", "127.0.0.2")
 	suite.NoError(err)
+	suite.Equal("10.0.0.10:80", conn.RemoteAddr().String())
 }
 
-func TestCircuitBreaker(t *testing.T) {
+func TestCooldownDialer(t *testing.T) {
 	t.Parallel()
-	suite.Run(t, &CircuitBreakerTestSuite{})
+	suite.Run(t, &CooldownDialerTestSuite{})
 }

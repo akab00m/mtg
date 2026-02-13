@@ -46,7 +46,6 @@ type Proxy struct {
 
 	allowFallbackOnUnknownDC bool
 	fallbackOnDialError      bool
-	enableCCSPadding         bool
 	tolerateTimeSkewness     time.Duration
 	domainFrontingPort       int
 	workerPool               *ants.PoolWithFunc
@@ -276,8 +275,7 @@ func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
 	}
 
 	ctx.clientConn = &faketls.Conn{
-		Conn:             ctx.clientConn,
-		EnableCCSPadding: p.enableCCSPadding,
+		Conn: ctx.clientConn,
 	}
 
 	return true
@@ -425,6 +423,14 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		tgOpts = append(tgOpts, telegram.WithConnectionPool(poolConfig))
 	}
 
+	// DC auto-refresh из JSON файла
+	if opts.DCConfigFile != "" {
+		tgOpts = append(tgOpts, telegram.WithDCConfigFile(
+			opts.DCConfigFile,
+			opts.DCRefreshInterval,
+		))
+	}
+
 	tg, err := telegram.New(opts.Network, opts.getPreferIP(), opts.UseTestDCs, tgOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build telegram dialer: %w", err)
@@ -465,7 +471,6 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		tolerateTimeSkewness:     opts.getTolerateTimeSkewness(),
 		allowFallbackOnUnknownDC: opts.AllowFallbackOnUnknownDC,
 		fallbackOnDialError:      opts.getFallbackOnDialError(),
-		enableCCSPadding:         opts.EnableCCSPadding,
 		telegram:                 tg,
 		config:                   config,
 		rateLimiter:              rateLimiter,
