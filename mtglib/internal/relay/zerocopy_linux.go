@@ -26,6 +26,11 @@ const (
 
 // copyWithZeroCopy пробует zero-copy splice для Linux,
 // при неудаче использует стандартное io.CopyBuffer.
+//
+// ВНИМАНИЕ: splice() работает только для raw *net.TCPConn → *net.TCPConn.
+// В текущей архитектуре src/dst обёрнуты в obfuscated2.Conn (AES-CTR шифрование),
+// поэтому type assertion на *net.TCPConn всегда возвращает false → fallback на io.CopyBuffer.
+// splice() станет активен только если добавить raw TCP relay без шифрования.
 func copyWithZeroCopy(src, dst essentials.Conn, buf []byte) (int64, error) {
 	// Пробуем zero-copy splice для Linux
 	n, err := zeroCopyRelay(src, dst)

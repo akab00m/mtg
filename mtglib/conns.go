@@ -34,11 +34,14 @@ func (c connTraffic) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
 
 	if n > 0 {
-		accumulated := c.readAcc.Add(uint64(n))
-		if accumulated >= trafficFlushThreshold {
-			// Сбрасываем аккумулятор и эмитим событие
-			c.readAcc.Store(0)
-			c.stream.Send(c.ctx, NewEventTraffic(c.streamID, uint(accumulated), true))
+		c.readAcc.Add(uint64(n))
+		if c.readAcc.Load() >= trafficFlushThreshold {
+			// Swap атомарно: забираем ВСЕ накопленные байты и обнуляем.
+			// Между Load() и Swap() другая goroutine может добавить байтов —
+			// они попадут в accumulated (не потеряются).
+			if accumulated := c.readAcc.Swap(0); accumulated > 0 {
+				c.stream.Send(c.ctx, NewEventTraffic(c.streamID, uint(accumulated), true))
+			}
 		}
 	}
 
@@ -49,10 +52,11 @@ func (c connTraffic) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
 
 	if n > 0 {
-		accumulated := c.writeAcc.Add(uint64(n))
-		if accumulated >= trafficFlushThreshold {
-			c.writeAcc.Store(0)
-			c.stream.Send(c.ctx, NewEventTraffic(c.streamID, uint(accumulated), false))
+		c.writeAcc.Add(uint64(n))
+		if c.writeAcc.Load() >= trafficFlushThreshold {
+			if accumulated := c.writeAcc.Swap(0); accumulated > 0 {
+				c.stream.Send(c.ctx, NewEventTraffic(c.streamID, uint(accumulated), false))
+			}
 		}
 	}
 
