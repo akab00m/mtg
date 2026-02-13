@@ -111,6 +111,8 @@ func eventStreamProcessor(ctx context.Context, eventChan <-chan mtglib.Event, ob
 				observer.EventDNSCacheMetrics(typedEvt)
 			case mtglib.EventPoolMetrics:
 				observer.EventPoolMetrics(typedEvt)
+			case mtglib.EventRateLimiterMetrics:
+				observer.EventRateLimiterMetrics(typedEvt)
 			case mtglib.EventIPListCacheFallback:
 				observer.EventIPListCacheFallback(typedEvt)
 			}

@@ -333,6 +333,10 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 					lastHits = hits
 					lastMisses = misses
 					lastEvictions = evictions
+
+					// Rate limiter map size — раннее обнаружение DDoS
+					rlSize := proxy.GetRateLimiterSize()
+					eventStream.Send(ctx, mtglib.NewEventRateLimiterMetrics(rlSize))
 				}
 			}
 		}()

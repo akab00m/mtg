@@ -53,6 +53,10 @@ func (o *ObserverMock) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
 	o.Called(evt)
 }
 
+func (o *ObserverMock) EventRateLimiterMetrics(evt mtglib.EventRateLimiterMetrics) {
+	o.Called(evt)
+}
+
 func (o *ObserverMock) EventIPListCacheFallback(evt mtglib.EventIPListCacheFallback) {
 	o.Called(evt)
 }

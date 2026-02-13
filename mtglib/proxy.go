@@ -220,6 +220,16 @@ func (p *Proxy) GetPoolStats() []telegram.PoolStats {
 	return p.telegram.PoolStats()
 }
 
+// GetRateLimiterSize returns number of tracked IPs in rate limiter.
+// Returns 0 if rate limiting is disabled.
+func (p *Proxy) GetRateLimiterSize() int {
+	if p.rateLimiter == nil {
+		return 0
+	}
+
+	return p.rateLimiter.Size()
+}
+
 func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
 	rec := record.AcquireRecord()
 	defer record.ReleaseRecord(rec)

@@ -292,3 +292,21 @@ func NewEventPoolMetrics(dc int, deltaHits, deltaMisses, deltaUnhealthy uint64, 
 		Idle:           idle,
 	}
 }
+
+// EventRateLimiterMetrics is emitted periodically to update rate limiter statistics.
+type EventRateLimiterMetrics struct {
+	eventBase
+
+	// Size is the current number of tracked IPs
+	Size int
+}
+
+// NewEventRateLimiterMetrics creates a new EventRateLimiterMetrics event.
+func NewEventRateLimiterMetrics(size int) EventRateLimiterMetrics {
+	return EventRateLimiterMetrics{
+		eventBase: eventBase{
+			timestamp: time.Now(),
+		},
+		Size: size,
+	}
+}

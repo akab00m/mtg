@@ -165,6 +165,10 @@ func (p prometheusProcessor) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
 	p.factory.UpdatePoolMetricsDelta(evt.DC, evt.DeltaHits, evt.DeltaMisses, evt.DeltaUnhealthy, evt.Idle)
 }
 
+func (p prometheusProcessor) EventRateLimiterMetrics(evt mtglib.EventRateLimiterMetrics) {
+	p.factory.metricRateLimiterSize.Set(float64(evt.Size))
+}
+
 func (p prometheusProcessor) Shutdown() {
 	for k, v := range p.streams {
 		releaseStreamInfo(v)
@@ -200,6 +204,7 @@ type PrometheusFactory struct {
 	metricDNSCacheSize      prometheus.Gauge
 	metricDNSCacheEvictions prometheus.Counter
 	metricRateLimitRejects  prometheus.Counter
+	metricRateLimiterSize   prometheus.Gauge
 
 	// Mobile optimization metrics (PHASE 4)
 	metricSessionDuration prometheus.Histogram // Длительность сессий для расчёта throughput
@@ -379,6 +384,11 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 			Name:      "rate_limit_rejects",
 			Help:      "Number of connections rejected due to rate limiting.",
 		}),
+		metricRateLimiterSize: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: metricPrefix,
+			Name:      "rate_limiter_tracked_ips",
+			Help:      "Current number of tracked IPs in rate limiter. High values may indicate DDoS.",
+		}),
 
 		// Mobile optimization metrics (PHASE 4)
 		metricSessionDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
@@ -444,6 +454,7 @@ func NewPrometheus(metricPrefix, httpPath, version string) *PrometheusFactory { 
 	registry.MustRegister(factory.metricDNSCacheSize)
 	registry.MustRegister(factory.metricDNSCacheEvictions)
 	registry.MustRegister(factory.metricRateLimitRejects)
+	registry.MustRegister(factory.metricRateLimiterSize)
 
 	// Register mobile optimization metrics (PHASE 4)
 	registry.MustRegister(factory.metricSessionDuration)

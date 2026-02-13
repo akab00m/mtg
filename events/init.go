@@ -62,6 +62,9 @@ type Observer interface {
 	// EventPoolMetrics reacts on incoming mtglib.EventPoolMetrics event.
 	EventPoolMetrics(mtglib.EventPoolMetrics)
 
+	// EventRateLimiterMetrics reacts on incoming mtglib.EventRateLimiterMetrics event.
+	EventRateLimiterMetrics(mtglib.EventRateLimiterMetrics)
+
 	// EventIPListCacheFallback reacts on incoming mtglib.EventIPListCacheFallback event.
 	EventIPListCacheFallback(mtglib.EventIPListCacheFallback)
 

@@ -96,6 +96,14 @@ func (rl *RateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
+// Size returns current number of tracked IPs in the rate limiter.
+func (rl *RateLimiter) Size() int {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+
+	return len(rl.limiters)
+}
+
 // cleanupLoop removes old rate limiters that haven't been used recently.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.cleanup)

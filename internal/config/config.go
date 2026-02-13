@@ -116,6 +116,38 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("incorrect bind-to parameter %s", c.BindTo.String())
 	}
 
+	// Connection Pool: если включён, требуются корректные параметры
+	if c.ConnectionPool.Enabled.Get(false) {
+		if c.ConnectionPool.MaxIdleConns.Value == 0 {
+			return fmt.Errorf("connection-pool.maxIdleConns must be > 0 when pool is enabled")
+		}
+
+		if c.ConnectionPool.IdleTimeout.Value == 0 {
+			return fmt.Errorf("connection-pool.idleTimeout must be > 0 when pool is enabled")
+		}
+	}
+
+	// Rate Limit: burst обязателен если rate limit включён
+	if c.RateLimit.Enabled.Get(false) && c.RateLimit.PerSecond.Value > 0 {
+		if c.RateLimit.Burst.Value == 0 {
+			return fmt.Errorf("rateLimit.burst must be > 0 when rate limiting is enabled")
+		}
+	}
+
+	// Prometheus: bindTo обязателен если включён
+	if c.Stats.Prometheus.Enabled.Get(false) {
+		if c.Stats.Prometheus.BindTo.Get("") == "" {
+			return fmt.Errorf("prometheus.bindTo is required when prometheus is enabled")
+		}
+	}
+
+	// StatsD: address обязателен если включён
+	if c.Stats.StatsD.Enabled.Get(false) {
+		if c.Stats.StatsD.Address.Get("") == "" {
+			return fmt.Errorf("statsd.address is required when statsd is enabled")
+		}
+	}
+
 	return nil
 }
 

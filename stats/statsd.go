@@ -159,6 +159,10 @@ func (s statsdProcessor) EventPoolMetrics(evt mtglib.EventPoolMetrics) {
 	s.client.Incr("connection_pool_unhealthy", int64(evt.DeltaUnhealthy), dcTag)
 }
 
+func (s statsdProcessor) EventRateLimiterMetrics(evt mtglib.EventRateLimiterMetrics) {
+	s.client.Gauge("rate_limiter_tracked_ips", int64(evt.Size))
+}
+
 func (s statsdProcessor) Shutdown() {
 	events := make([]mtglib.EventFinish, 0, len(s.streams))
 
