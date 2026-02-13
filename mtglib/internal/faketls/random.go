@@ -3,6 +3,7 @@ package faketls
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 )
 
 // secureRandIntn возвращает криптографически случайное число в диапазоне [0, n).
@@ -18,8 +19,9 @@ func secureRandIntn(n int) int {
 
 	if _, err := rand.Read(buf[:]); err != nil {
 		// crypto/rand.Read не должен возвращать ошибку на поддерживаемых ОС.
-		// Если это произошло — система в критическом состоянии.
-		return 0
+		// Если это произошло — система в критическом состоянии (нет /dev/urandom).
+		// panic предпочтительнее: предсказуемые значения = обход шифрования.
+		panic(fmt.Sprintf("crypto/rand.Read failed: %v", err))
 	}
 
 	return int(binary.LittleEndian.Uint64(buf[:]) % uint64(n)) //nolint: gosec

@@ -16,13 +16,6 @@ const (
 	dirDownload                  // telegram -> client (приоритетное)
 )
 
-// Глобальный адаптивный буфер для управления размером буферов
-// Безопасно для concurrent использования
-var globalAdaptiveBuffer = NewAdaptiveBuffer(
-	64*1024,  // Min: 64KB
-	512*1024, // Max: 512KB
-)
-
 func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.Conn) {
 	defer telegramConn.Close()
 	defer clientConn.Close()
@@ -52,26 +45,22 @@ func Relay(ctx context.Context, log Logger, telegramConn, clientConn essentials.
 	setTCPUserTimeout(telegramConn, 30000)
 	setTCPUserTimeout(clientConn, 30000)
 
-	// Создаём статистику для адаптивного управления буферами
-	downloadStats := NewStreamStats()
-	uploadStats := NewStreamStats()
-
 	// Upload: client -> telegram (обычный приоритет)
 	go func() {
 		defer close(closeChan)
-		pump(log, telegramConn, clientConn, "client -> telegram", dirUpload, uploadStats)
+		pump(log, telegramConn, clientConn, "client -> telegram", dirUpload)
 	}()
 
 	// Download: telegram -> client (высокий приоритет)
 	// Для download настраиваем TCP для минимальной latency
 	setTCPQuickACK(clientConn) // Немедленные ACK
 
-	pump(log, clientConn, telegramConn, "telegram -> client", dirDownload, downloadStats)
+	pump(log, clientConn, telegramConn, "telegram -> client", dirDownload)
 
 	<-closeChan
 }
 
-func pump(log Logger, src, dst essentials.Conn, directionStr string, dir direction, stats *StreamStats) {
+func pump(log Logger, src, dst essentials.Conn, directionStr string, dir direction) {
 	defer src.CloseRead()  //nolint: errcheck
 	defer dst.CloseWrite() //nolint: errcheck
 
@@ -108,8 +97,7 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 	}
 
 	// Try zero-copy first (Linux splice), fallback to standard copy
-	// Передаём статистику для адаптивного управления
-	n, err := copyWithZeroCopyAdaptive(src, dst, *copyBuffer, stats)
+	n, err := copyWithZeroCopy(src, dst, *copyBuffer)
 
 	switch {
 	case err == nil:

@@ -49,8 +49,8 @@ func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 
-// BenchmarkCopyWithZeroCopy тестирует скорость копирования
-func BenchmarkCopyWithZeroCopy(b *testing.B) {
+// BenchmarkCopyWithZeroCopyAdaptive тестирует скорость копирования с адаптивным буфером
+func BenchmarkCopyWithZeroCopyAdaptive(b *testing.B) {
 	sizes := []int{
 		1024,        // 1 KB
 		64 * 1024,   // 64 KB
@@ -71,8 +71,9 @@ func BenchmarkCopyWithZeroCopy(b *testing.B) {
 				src := newMockConn(data)
 				dst := newMockConn(nil)
 				buf := make([]byte, 32*1024)
+				stats := NewStreamStats()
 
-				_, _ = copyWithZeroCopy(src, dst, buf)
+				_, _ = copyWithZeroCopyAdaptive(src, dst, buf, stats)
 			}
 		})
 	}
@@ -143,8 +144,9 @@ func BenchmarkConcurrentRelay(b *testing.B) {
 						src := newMockConn(data)
 						dst := newMockConn(nil)
 						buf := make([]byte, 32*1024)
+						stats := NewStreamStats()
 
-						_, _ = copyWithZeroCopy(src, dst, buf)
+						_, _ = copyWithZeroCopyAdaptive(src, dst, buf, stats)
 					}()
 				}
 

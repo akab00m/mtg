@@ -18,6 +18,11 @@ const (
 	defaultDNSTTL       = 300  // 5 minutes fallback TTL if DNS doesn't provide one
 	minDNSTTL           = 60   // Minimum 1 minute TTL (prevent abuse)
 	maxDNSTTL           = 3600 // Maximum 1 hour TTL (prevent stale data)
+
+	// Максимальный размер DNS-ответа через DoH (64 КБ).
+	// RFC 8484 не ограничивает ответ, но реальные ответы < 4 КБ.
+	// 64 КБ — верхняя граница UDP DNS (с EDNS0) с большим запасом.
+	maxDoHResponseSize = 64 * 1024
 )
 
 type dnsResolver struct {
@@ -60,7 +65,7 @@ func (d *dnsResolver) doQuery(hostname string, qtype uint16) ([]dns.RR, error) {
 		return nil, fmt.Errorf("DoH server returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDoHResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

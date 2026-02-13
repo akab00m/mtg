@@ -21,6 +21,12 @@ import (
 	"github.com/yl2chen/cidranger"
 )
 
+const (
+	// Максимальный размер загружаемого blocklist-файла (100 МБ).
+	// Крупнейшие публичные списки FireHOL < 20 МБ.
+	maxBlocklistSize = 100 * 1024 * 1024
+)
+
 var (
 	fireholRegexpComment = regexp.MustCompile(`\s*#.*?$`)
 
@@ -248,11 +254,19 @@ func (f *Firehol) saveRemoteSnapshot(file files.File, fileContent io.ReadCloser)
 		return "", fmt.Errorf("cannot create temp snapshot file: %w", err)
 	}
 
-	if _, err := io.Copy(tmpFile, fileContent); err != nil {
+	written, err := io.Copy(tmpFile, io.LimitReader(fileContent, maxBlocklistSize))
+	if err != nil {
 		tmpFile.Close()
 		os.Remove(tmpFile.Name())
 
 		return "", fmt.Errorf("cannot save remote snapshot: %w", err)
+	}
+
+	if written >= maxBlocklistSize {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+
+		return "", fmt.Errorf("remote blocklist exceeds %d bytes limit", maxBlocklistSize)
 	}
 
 	if err := tmpFile.Close(); err != nil {

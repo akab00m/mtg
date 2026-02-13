@@ -51,9 +51,16 @@ func ServerHandshake(writer io.Writer) (cipher.Stream, cipher.Stream, error) {
 }
 
 func generateServerHanshakeFrame() (serverHandshakeFrame, error) {
+	// Максимальное количество попыток генерации валидного фрейма.
+	// Вероятность отклонения одной итерации < 1/256 + 5/2^32 + 1/2^32 ≈ 0.4%.
+	// Вероятность 100 последовательных отклонений: ~10^(-240), практически невозможно.
+	const maxAttempts = 100
+
 	frame := serverHandshakeFrame{}
 
-	for {
+	for i := range maxAttempts {
+		_ = i
+
 		if _, err := rand.Read(frame.data[:]); err != nil {
 			return serverHandshakeFrame{}, fmt.Errorf("cannot generate random data: %w", err)
 		}
@@ -75,4 +82,6 @@ func generateServerHanshakeFrame() (serverHandshakeFrame, error) {
 
 		return frame, nil
 	}
+
+	return serverHandshakeFrame{}, fmt.Errorf("failed to generate valid handshake frame after %d attempts", maxAttempts)
 }

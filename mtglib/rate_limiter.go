@@ -8,6 +8,13 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	// Максимальное количество записей в rate limiter map.
+	// Превышение означает DDoS — новые IP отклоняются.
+	// 50 000 записей ≈ 5 МБ памяти (limiter + lastUsed + ключи).
+	maxRateLimiterEntries = 50_000
+)
+
 // RateLimiter provides IP-based rate limiting for connections.
 type RateLimiter struct {
 	limiters map[string]*rate.Limiter
@@ -59,6 +66,14 @@ func (rl *RateLimiter) Allow(ip net.IP) bool {
 	// Double-check после escalation — другая goroutine могла добавить
 	limiter, exists = rl.limiters[key]
 	if !exists {
+		// Защита от переполнения: при DDoS с множеством IP
+		// отклоняем новые соединения, пока cleanup не освободит место
+		if len(rl.limiters) >= maxRateLimiterEntries {
+			rl.mu.Unlock()
+
+			return false
+		}
+
 		limiter = rate.NewLimiter(rl.r, rl.b)
 		rl.limiters[key] = limiter
 	}
