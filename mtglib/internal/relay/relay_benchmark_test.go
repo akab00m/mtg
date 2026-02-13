@@ -49,8 +49,8 @@ func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 
-// BenchmarkCopyWithZeroCopyAdaptive тестирует скорость копирования с адаптивным буфером
-func BenchmarkCopyWithZeroCopyAdaptive(b *testing.B) {
+// BenchmarkCopyWithZeroCopy тестирует скорость копирования
+func BenchmarkCopyWithZeroCopy(b *testing.B) {
 	sizes := []int{
 		1024,        // 1 KB
 		64 * 1024,   // 64 KB
@@ -63,7 +63,7 @@ func BenchmarkCopyWithZeroCopyAdaptive(b *testing.B) {
 			data[i] = byte(i % 256)
 		}
 
-		b.Run(formatSize(size), func(b *testing.B) {
+			b.Run(formatSize(size), func(b *testing.B) {
 			b.SetBytes(int64(size))
 			b.ResetTimer()
 
@@ -71,9 +71,8 @@ func BenchmarkCopyWithZeroCopyAdaptive(b *testing.B) {
 				src := newMockConn(data)
 				dst := newMockConn(nil)
 				buf := make([]byte, 32*1024)
-				stats := NewStreamStats()
 
-				_, _ = copyWithZeroCopyAdaptive(src, dst, buf, stats)
+				_, _ = copyWithZeroCopy(src, dst, buf)
 			}
 		})
 	}
@@ -144,9 +143,8 @@ func BenchmarkConcurrentRelay(b *testing.B) {
 						src := newMockConn(data)
 						dst := newMockConn(nil)
 						buf := make([]byte, 32*1024)
-						stats := NewStreamStats()
 
-						_, _ = copyWithZeroCopyAdaptive(src, dst, buf, stats)
+					_, _ = copyWithZeroCopy(src, dst, buf)
 					}()
 				}
 

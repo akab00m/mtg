@@ -25,13 +25,15 @@ func (c Conn) Read(p []byte) (int, error) {
 }
 
 func (c Conn) Write(p []byte) (int, error) {
-	buf := acquireBytesBuffer()
-	defer releaseBytesBuffer(buf)
+	// Получаем буфер из пула и гарантируем достаточный размер
+	buf := acquireWriteBuffer(len(p))
+	defer releaseWriteBuffer(buf)
 
-	buf.Write(p)
+	// XOR напрямую из p в buf за один проход.
+	// Копия необходима: контракт io.Writer запрещает модификацию p,
+	// а io.CopyBuffer переиспользует свой буфер между итерациями.
+	dst := (*buf)[:len(p)]
+	c.Encryptor.XORKeyStream(dst, p)
 
-	payload := buf.Bytes()
-	c.Encryptor.XORKeyStream(payload, payload)
-
-	return c.Conn.Write(payload) //nolint: wrapcheck
+	return c.Conn.Write(dst) //nolint: wrapcheck
 }

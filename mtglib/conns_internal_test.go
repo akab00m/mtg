@@ -30,18 +30,18 @@ type ConnTrafficTestSuite struct {
 
 	eventStreamMock *EventStreamMock
 	connMock        *testlib.EssentialsConnMock
-	conn            io.ReadWriter
+	conn            connTraffic
 }
 
 func (suite *ConnTrafficTestSuite) SetupTest() {
 	suite.eventStreamMock = &EventStreamMock{}
 	suite.connMock = &testlib.EssentialsConnMock{}
-	suite.conn = connTraffic{
-		Conn:     suite.connMock,
-		streamID: "CONNID",
-		ctx:      context.Background(),
-		stream:   suite.eventStreamMock,
-	}
+	suite.conn = newConnTraffic(
+		suite.connMock,
+		"CONNID",
+		suite.eventStreamMock,
+		context.Background(),
+	)
 }
 
 func (suite *ConnTrafficTestSuite) TearDownTest() {
@@ -50,6 +50,8 @@ func (suite *ConnTrafficTestSuite) TearDownTest() {
 }
 
 func (suite *ConnTrafficTestSuite) TestReadOk() {
+	// Читаем больше trafficFlushThreshold чтобы вызвать эмиссию
+	readSize := int(trafficFlushThreshold) + 100
 	suite.eventStreamMock.
 		On("Send", mock.Anything, mock.Anything).
 		Once().
@@ -59,17 +61,49 @@ func (suite *ConnTrafficTestSuite) TestReadOk() {
 			suite.True(ok)
 			suite.Equal("CONNID", evt.StreamID())
 			suite.WithinDuration(time.Now(), evt.Timestamp(), time.Second)
-			suite.EqualValues(10, evt.Traffic)
+			suite.EqualValues(readSize, evt.Traffic)
 			suite.True(evt.IsRead)
 		})
+	suite.connMock.On("Read", mock.Anything).Once().Return(readSize, nil)
+
+	n, err := suite.conn.Read(make([]byte, readSize))
+	suite.NoError(err)
+	suite.Equal(readSize, n)
+}
+
+func (suite *ConnTrafficTestSuite) TestReadBelowThreshold() {
+	// Чтение меньше порога — событие НЕ эмитится
 	suite.connMock.On("Read", mock.Anything).Once().Return(10, nil)
 
 	n, err := suite.conn.Read(make([]byte, 10))
 	suite.NoError(err)
 	suite.Equal(10, n)
+	// Нет вызовов Send — eventStreamMock.AssertExpectations проверит это
 }
 
-func (suite *ConnTrafficTestSuite) TestReadErr() { //nolint: dupl
+func (suite *ConnTrafficTestSuite) TestReadFlushOnClose() {
+	// Чтение меньше порога + Close = flush остатка
+	suite.connMock.On("Read", mock.Anything).Once().Return(10, nil)
+	suite.connMock.On("Close").Once().Return(nil)
+	suite.eventStreamMock.
+		On("Send", mock.Anything, mock.Anything).
+		Once().
+		Run(func(args mock.Arguments) {
+			evt, ok := args.Get(1).(EventTraffic)
+			suite.True(ok)
+			suite.EqualValues(10, evt.Traffic)
+			suite.True(evt.IsRead)
+		})
+
+	n, err := suite.conn.Read(make([]byte, 10))
+	suite.NoError(err)
+	suite.Equal(10, n)
+
+	suite.NoError(suite.conn.Close())
+}
+
+func (suite *ConnTrafficTestSuite) TestReadErr() {
+	readSize := int(trafficFlushThreshold) + 100
 	suite.eventStreamMock.
 		On("Send", mock.Anything, mock.Anything).
 		Once().
@@ -79,14 +113,14 @@ func (suite *ConnTrafficTestSuite) TestReadErr() { //nolint: dupl
 			suite.True(ok)
 			suite.Equal("CONNID", evt.StreamID())
 			suite.WithinDuration(time.Now(), evt.Timestamp(), time.Second)
-			suite.EqualValues(10, evt.Traffic)
+			suite.EqualValues(readSize, evt.Traffic)
 			suite.True(evt.IsRead)
 		})
-	suite.connMock.On("Read", mock.Anything).Once().Return(10, io.EOF)
+	suite.connMock.On("Read", mock.Anything).Once().Return(readSize, io.EOF)
 
-	n, err := suite.conn.Read(make([]byte, 10))
+	n, err := suite.conn.Read(make([]byte, readSize))
 	suite.True(errors.Is(err, io.EOF))
-	suite.Equal(10, n)
+	suite.Equal(readSize, n)
 }
 
 func (suite *ConnTrafficTestSuite) TestReadNothingOk() {
@@ -106,6 +140,7 @@ func (suite *ConnTrafficTestSuite) TestReadNothingErr() {
 }
 
 func (suite *ConnTrafficTestSuite) TestWriteOk() {
+	writeSize := int(trafficFlushThreshold) + 100
 	suite.eventStreamMock.
 		On("Send", mock.Anything, mock.Anything).
 		Once().
@@ -115,17 +150,18 @@ func (suite *ConnTrafficTestSuite) TestWriteOk() {
 			suite.True(ok)
 			suite.Equal("CONNID", evt.StreamID())
 			suite.WithinDuration(time.Now(), evt.Timestamp(), time.Second)
-			suite.EqualValues(10, evt.Traffic)
+			suite.EqualValues(writeSize, evt.Traffic)
 			suite.False(evt.IsRead)
 		})
-	suite.connMock.On("Write", mock.Anything).Once().Return(10, nil)
+	suite.connMock.On("Write", mock.Anything).Once().Return(writeSize, nil)
 
-	n, err := suite.conn.Write(make([]byte, 10))
+	n, err := suite.conn.Write(make([]byte, writeSize))
 	suite.NoError(err)
-	suite.Equal(10, n)
+	suite.Equal(writeSize, n)
 }
 
-func (suite *ConnTrafficTestSuite) TestWriteErr() { //nolint: dupl
+func (suite *ConnTrafficTestSuite) TestWriteErr() {
+	writeSize := int(trafficFlushThreshold) + 100
 	suite.eventStreamMock.
 		On("Send", mock.Anything, mock.Anything).
 		Once().
@@ -135,14 +171,14 @@ func (suite *ConnTrafficTestSuite) TestWriteErr() { //nolint: dupl
 			suite.True(ok)
 			suite.Equal("CONNID", evt.StreamID())
 			suite.WithinDuration(time.Now(), evt.Timestamp(), time.Second)
-			suite.EqualValues(10, evt.Traffic)
+			suite.EqualValues(writeSize, evt.Traffic)
 			suite.False(evt.IsRead)
 		})
-	suite.connMock.On("Write", mock.Anything).Once().Return(10, io.EOF)
+	suite.connMock.On("Write", mock.Anything).Once().Return(writeSize, io.EOF)
 
-	n, err := suite.conn.Write(make([]byte, 10))
+	n, err := suite.conn.Write(make([]byte, writeSize))
 	suite.True(errors.Is(err, io.EOF))
-	suite.Equal(10, n)
+	suite.Equal(writeSize, n)
 }
 
 func (suite *ConnTrafficTestSuite) TestWriteNothingOk() {

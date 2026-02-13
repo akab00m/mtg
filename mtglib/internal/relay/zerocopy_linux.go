@@ -37,8 +37,9 @@ func copyWithZeroCopy(src, dst essentials.Conn, buf []byte) (int64, error) {
 	return io.CopyBuffer(dst, src, buf)
 }
 
-// zeroCopyRelayWithStats — версия с отслеживанием статистики.
-func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64, error) {
+// zeroCopyRelay использует Linux splice() для zero-copy передачи между TCP сокетами.
+// Возвращает -1 если splice невозможен (non-TCP connections).
+func zeroCopyRelay(src, dst essentials.Conn) (int64, error) {
 	// Получаем TCP connections
 	srcTCP, srcOk := src.(*net.TCPConn)
 	dstTCP, dstOk := dst.(*net.TCPConn)
@@ -77,16 +78,7 @@ func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64
 	defer syscall.Close(pipeFds[0])
 	defer syscall.Close(pipeFds[1])
 
-	// Адаптивный размер pipe буфера на основе throughput
-	currentPipeSize := pipeSize
-	if stats != nil {
-		throughput := stats.GetThroughput()
-		// Для высокого throughput (>10MB/s) увеличиваем буфер
-		if throughput > 10*1024*1024 {
-			currentPipeSize = 512 * 1024 // 512KB
-		}
-	}
-	_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, uintptr(currentPipeSize))
+	_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(pipeFds[0]), syscall.F_SETPIPE_SZ, uintptr(pipeSize))
 
 	var totalBytes int64
 	var fdErr error
@@ -101,7 +93,7 @@ func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64
 			}
 
 			// splice: src socket -> pipe
-			n1, err := unix.Splice(int(fd), nil, pipeFds[1], nil, currentPipeSize, unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK)
+			n1, err := unix.Splice(int(fd), nil, pipeFds[1], nil, pipeSize, unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK)
 			if err != nil {
 				if err == syscall.EAGAIN {
 					return false
@@ -131,11 +123,6 @@ func zeroCopyRelayWithStats(src, dst essentials.Conn, stats *StreamStats) (int64
 			}
 
 			totalBytes += written
-
-			// Обновляем статистику
-			if stats != nil {
-				stats.AddBytes(written)
-			}
 		}
 	})
 

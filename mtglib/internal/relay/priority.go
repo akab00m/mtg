@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -19,7 +18,7 @@ const (
 	PriorityHigh
 )
 
-// StreamStats отслеживает статистику потока для адаптивного управления буферами.
+// StreamStats отслеживает статистику потока для мониторинга.
 // Все операции атомарные — безопасно для concurrent использования.
 type StreamStats struct {
 	// Счётчики байтов
@@ -84,77 +83,6 @@ func (s *StreamStats) GetThroughput() int64 {
 // GetTotalBytes возвращает общее количество переданных байт.
 func (s *StreamStats) GetTotalBytes() int64 {
 	return s.bytesTransferred.Load()
-}
-
-// AdaptiveBuffer управляет размером буфера на основе throughput.
-// Безопасная реализация без изменения wire-level pattern.
-type AdaptiveBuffer struct {
-	mu sync.RWMutex
-
-	// Текущий размер буфера
-	currentSize int
-
-	// Границы адаптации
-	minSize int
-	maxSize int
-
-	// Пороги throughput для адаптации (bytes/sec)
-	lowThroughputThreshold  int64 // Ниже этого — уменьшаем буфер
-	highThroughputThreshold int64 // Выше этого — увеличиваем буфер
-
-	// Счётчик стабильности (сколько раз throughput был в нужном диапазоне)
-	stabilityCounter int
-}
-
-// NewAdaptiveBuffer создаёт адаптивный менеджер буферов.
-// minSize и maxSize — границы адаптации размера буфера.
-func NewAdaptiveBuffer(minSize, maxSize int) *AdaptiveBuffer {
-	return &AdaptiveBuffer{
-		currentSize: minSize, // Начинаем с минимума (консервативно)
-		minSize:     minSize,
-		maxSize:     maxSize,
-
-		// Пороги: 1 MB/s (низкий), 10 MB/s (высокий)
-		lowThroughputThreshold:  1 * 1024 * 1024,
-		highThroughputThreshold: 10 * 1024 * 1024,
-	}
-}
-
-// GetOptimalSize возвращает оптимальный размер буфера на основе throughput.
-// Изменение размера буфера НЕ влияет на wire-level pattern — это внутренняя оптимизация.
-func (ab *AdaptiveBuffer) GetOptimalSize(throughput int64) int {
-	ab.mu.Lock()
-	defer ab.mu.Unlock()
-
-	switch {
-	case throughput < ab.lowThroughputThreshold:
-		// Низкий throughput — уменьшаем буфер для экономии памяти
-		ab.stabilityCounter++
-		if ab.stabilityCounter > 5 && ab.currentSize > ab.minSize {
-			ab.currentSize = ab.currentSize * 3 / 4 // Уменьшаем на 25%
-			if ab.currentSize < ab.minSize {
-				ab.currentSize = ab.minSize
-			}
-			ab.stabilityCounter = 0
-		}
-
-	case throughput > ab.highThroughputThreshold:
-		// Высокий throughput — увеличиваем буфер для лучшего performance
-		ab.stabilityCounter++
-		if ab.stabilityCounter > 3 && ab.currentSize < ab.maxSize {
-			ab.currentSize = ab.currentSize * 5 / 4 // Увеличиваем на 25%
-			if ab.currentSize > ab.maxSize {
-				ab.currentSize = ab.maxSize
-			}
-			ab.stabilityCounter = 0
-		}
-
-	default:
-		// Средний throughput — сбрасываем счётчик стабильности
-		ab.stabilityCounter = 0
-	}
-
-	return ab.currentSize
 }
 
 // priorityHints — placeholder для приоритизации потоков данных.

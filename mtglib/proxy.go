@@ -363,12 +363,7 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	}
 
 	ctx.telegramConn = obfuscated2.Conn{
-		Conn: connTraffic{
-			Conn:     conn,
-			streamID: ctx.streamID,
-			stream:   p.eventStream,
-			ctx:      ctx,
-		},
+		Conn: newConnTraffic(conn, ctx.streamID, p.eventStream, ctx),
 		Encryptor: encryptor,
 		Decryptor: decryptor,
 	}
@@ -393,12 +388,7 @@ func (p *Proxy) doDomainFronting(ctx *streamContext, conn *connRewind) {
 		return
 	}
 
-	frontConn = connTraffic{
-		Conn:     frontConn,
-		ctx:      ctx,
-		streamID: ctx.streamID,
-		stream:   p.eventStream,
-	}
+	frontConn = newConnTraffic(frontConn, ctx.streamID, p.eventStream, ctx)
 
 	relay.Relay(
 		ctx,
