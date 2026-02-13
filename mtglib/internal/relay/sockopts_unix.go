@@ -3,22 +3,23 @@
 package relay
 
 import (
+	"log"
 	"net"
 
 	"golang.org/x/sys/unix"
 )
 
-// TCP socket options константы для Linux
-// Эти значения не экспортированы в golang.org/x/sys/unix
+// TCP socket options константы для Linux.
+// Эти значения не экспортированы в golang.org/x/sys/unix.
 const (
-	// TCP_NOTSENT_LOWAT - уведомляет приложение когда в буфере
+	// TCP_NOTSENT_LOWAT — уведомляет приложение когда в буфере
 	// отправки осталось меньше threshold байт.
-	// Доступен с kernel 3.12
+	// Доступен с kernel 3.12.
 	TCP_NOTSENT_LOWAT = 25
 
-	// TCP_USER_TIMEOUT - таймаут для обнаружения мертвых соединений.
+	// TCP_USER_TIMEOUT — таймаут для обнаружения мертвых соединений.
 	// Соединение закрывается если нет ACK в течение указанного времени.
-	// Доступен с kernel 2.6.37
+	// Доступен с kernel 2.6.37.
 	TCP_USER_TIMEOUT = 18
 )
 
@@ -31,11 +32,14 @@ func setTCPQuickACK(conn net.Conn) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
+		log.Printf("[relay] TCP_QUICKACK: SyscallConn failed: %v", err)
 		return
 	}
 
-	rawConn.Control(func(fd uintptr) { //nolint: errcheck
-		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1) //nolint: nosnakecase,errcheck
+	_ = rawConn.Control(func(fd uintptr) {
+		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_QUICKACK, 1); err != nil { //nolint: nosnakecase
+			log.Printf("[relay] TCP_QUICKACK: setsockopt failed: %v", err)
+		}
 	})
 }
 
@@ -47,13 +51,13 @@ func setTCPNoDelay(conn net.Conn) {
 		return
 	}
 
-	// SetNoDelay отключает buffering мелких пакетов
-	_ = tcpConn.SetNoDelay(true)
+	if err := tcpConn.SetNoDelay(true); err != nil {
+		log.Printf("[relay] TCP_NODELAY: SetNoDelay failed: %v", err)
+	}
 }
 
 // setTCPNotSentLowat устанавливает TCP_NOTSENT_LOWAT для снижения latency.
 // Уведомляет приложение когда в буфере отправки осталось меньше threshold байт.
-// Это позволяет быстрее реагировать и поддерживать низкую задержку.
 func setTCPNotSentLowat(conn net.Conn, threshold int) {
 	tcpConn, ok := conn.(*net.TCPConn)
 	if !ok {
@@ -62,11 +66,14 @@ func setTCPNotSentLowat(conn net.Conn, threshold int) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
+		log.Printf("[relay] TCP_NOTSENT_LOWAT: SyscallConn failed: %v", err)
 		return
 	}
 
-	rawConn.Control(func(fd uintptr) { //nolint: errcheck
-		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_NOTSENT_LOWAT, threshold) //nolint: errcheck
+	_ = rawConn.Control(func(fd uintptr) {
+		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_NOTSENT_LOWAT, threshold); err != nil {
+			log.Printf("[relay] TCP_NOTSENT_LOWAT(%d): setsockopt failed: %v", threshold, err)
+		}
 	})
 }
 
@@ -80,11 +87,14 @@ func setTCPUserTimeout(conn net.Conn, timeoutMs int) {
 
 	rawConn, err := tcpConn.SyscallConn()
 	if err != nil {
+		log.Printf("[relay] TCP_USER_TIMEOUT: SyscallConn failed: %v", err)
 		return
 	}
 
-	rawConn.Control(func(fd uintptr) { //nolint: errcheck
-		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_USER_TIMEOUT, timeoutMs) //nolint: errcheck
+	_ = rawConn.Control(func(fd uintptr) {
+		if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, TCP_USER_TIMEOUT, timeoutMs); err != nil {
+			log.Printf("[relay] TCP_USER_TIMEOUT(%dms): setsockopt failed: %v", timeoutMs, err)
+		}
 	})
 }
 

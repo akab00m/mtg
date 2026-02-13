@@ -8,6 +8,13 @@ import (
 	"github.com/9seconds/mtg/v2/essentials"
 )
 
+// copyRelay копирует данные между соединениями через io.CopyBuffer.
+// splice() (zero-copy) невозможен: все соединения обёрнуты в obfuscated2.Conn
+// и faketls.Conn для AES-CTR шифрования — данные ДОЛЖНЫ проходить через userspace.
+func copyRelay(dst, src essentials.Conn, buf []byte) (int64, error) {
+	return io.CopyBuffer(dst, src, buf)
+}
+
 // Направление передачи данных
 type direction int
 
@@ -67,14 +74,7 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 	copyBuffer := acquireCopyBuffer()
 	defer releaseCopyBuffer(copyBuffer)
 
-	// Применяем приоритетные hints для download направления
-	// ВАЖНО: Это влияет только на внутренний scheduling, НЕ на wire-level pattern
-	if dir == dirDownload {
-		PriorityHints.ApplyHighPriority()
-		defer PriorityHints.ReleaseHighPriority()
-	}
-
-	// Оптимизации TCP для обоих направлений (много мелких пакетов)
+	// TCP оптимизации для обоих направлений (много мелких пакетов)
 	// TCP_NODELAY уже установлен в Relay(), здесь дополнительные настройки
 
 	if dir == dirDownload {
@@ -87,7 +87,6 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		// TCP_NOTSENT_LOWAT — порог неотправленных данных для wake-up epoll.
 		// 128KB = значение Cloudflare в production (blog 2022).
 		// Меньшие значения дают больше write events и overhead.
-		// При splice с 256KB pipe-буфером, 128KB обеспечивает 1-2 wake-up на pipe.
 		setTCPNotSentLowat(dst, 131072)
 	} else {
 		// Upload: client -> telegram
@@ -96,8 +95,7 @@ func pump(log Logger, src, dst essentials.Conn, directionStr string, dir directi
 		setTCPQuickACK(dst)
 	}
 
-	// Try zero-copy first (Linux splice), fallback to standard copy
-	n, err := copyWithZeroCopy(src, dst, *copyBuffer)
+	n, err := copyRelay(dst, src, *copyBuffer)
 
 	switch {
 	case err == nil:

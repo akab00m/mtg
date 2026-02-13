@@ -47,8 +47,16 @@ func NewRateLimiter(r rate.Limit, b int, cleanup time.Duration) *RateLimiter {
 
 // Allow checks if a request from the given IP should be allowed.
 func (rl *RateLimiter) Allow(ip net.IP) bool {
-	// string(ip) — raw bytes (4/16 байт), дешевле ip.String() (форматирование "1.2.3.4")
-	key := string(ip)
+	// Нормализация: IPv4 (4 байта) и IPv4-mapped IPv6 (::ffff:x.x.x.x, 16 байт)
+	// должны быть одним ключом. To16() всегда возвращает 16-byte представление.
+	normalized := ip.To16()
+	if normalized == nil {
+		// Невалидный IP — отклоняем
+		return false
+	}
+
+	// string(ip) — raw bytes (16 байт), дешевле ip.String() (форматирование "1.2.3.4")
+	key := string(normalized)
 
 	// Fast path: для существующих IP достаточно RLock (read-only).
 	// lastUsed не обновляем — worst case: limiter пересоздастся при cleanup,
